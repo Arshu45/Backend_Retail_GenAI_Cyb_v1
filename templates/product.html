@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+
+{% block title %}Product Details - ShopHub{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-5" id="productContainer">
+    <!-- Loading Spinner -->
+    <!-- <div class="text-center py-5" id="loadingSpinner">
+        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="text-muted mt-3">Loading product details...</p>
+    </div> -->
+
+    <!-- Product Details (will be populated) -->
+    <div id="productDetails" style="display: none;">
+        <!-- Back Button -->
+        <a href="{{ url_for('read_root') }}" class="btn btn-outline-secondary mb-4">
+            <i class="bi bi-arrow-left"></i> Back to Products
+        </a>
+
+        <div class="row g-5">
+            <!-- Product Images -->
+            <div class="col-lg-6">
+                <div class="product-detail-image-container mb-3">
+                    <img id="mainImage" src="" alt="Product Image" class="product-image-main w-100">
+                </div>
+                <div class="d-flex gap-3 flex-wrap justify-content-center" id="thumbnailContainer">
+                    <!-- Thumbnails will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Product Info -->
+            <div class="col-lg-6">
+                <div class="product-detail-info">
+                    <!-- Title & Brand -->
+                    <h1 class="product-detail-title mb-3" id="productTitle"></h1>
+                    
+                    <div class="product-meta mb-4">
+                        <span class="me-3">
+                            <i class="bi bi-tag-fill"></i> 
+                            <span id="productBrand" class="fw-semibold"></span>
+                        </span>
+                        <span>
+                            <i class="bi bi-grid-fill"></i> 
+                            <span id="productType"></span>
+                        </span>
+                    </div>
+
+                    <!-- Stock Badge -->
+                    <div class="mb-4">
+                        <span id="stockBadge" class="badge"></span>
+                    </div>
+
+                    <!-- Pricing -->
+                    <div class="product-pricing mb-4">
+                        <div class="d-flex align-items-baseline gap-3 mb-2">
+                            <div class="price-display" id="priceDisplay"></div>
+                            <div class="mrp-display" id="mrpDisplay"></div>
+                        </div>
+                        <div id="discountBadge"></div>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="product-description mb-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="bi bi-card-text"></i> Description
+                        </h5>
+                        <p id="productDescription" class="text-muted">No description available.</p>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="product-actions mb-4">
+                        <button class="btn btn-primary btn-lg w-100 mb-3" id="addToCartBtn" disabled>
+                            <i class="bi bi-cart-plus-fill"></i> Add to Cart
+                        </button>
+                        <button class="btn btn-outline-secondary w-100">
+                            <i class="bi bi-heart"></i> Add to Wishlist
+                        </button>
+                    </div>
+
+                    <!-- Quick Info Cards -->
+                    <div class="row g-3">
+                        <div class="col-6">
+                            <div class="info-card">
+                                <i class="bi bi-truck"></i>
+                                <div>
+                                    <strong>Fast Delivery</strong>
+                                    <small>2-3 business days</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="info-card">
+                                <i class="bi bi-shield-check"></i>
+                                <div>
+                                    <strong>Secure Payment</strong>
+                                    <small>100% protected</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="info-card">
+                                <i class="bi bi-arrow-repeat"></i>
+                                <div>
+                                    <strong>Easy Returns</strong>
+                                    <small>30-day policy</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="info-card">
+                                <i class="bi bi-headset"></i>
+                                <div>
+                                    <strong>24/7 Support</strong>
+                                    <small>Always here</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Product Attributes -->
+        <div class="row mt-5">
+            <div class="col-12">
+                <div class="attributes-section">
+                    <h3 class="mb-4">
+                        <i class="bi bi-list-ul"></i> Product Specifications
+                    </h3>
+                    <div class="table-responsive">
+                        <table class="table attribute-table">
+                            <tbody id="attributesTable">
+                                <!-- Attributes will be loaded here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Message -->
+    <div id="errorMessage" style="display: none;">
+        <div class="error-container">
+            <div class="error-icon">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+            </div>
+            <h3>Oops! Product Not Found</h3>
+            <p class="text-muted" id="errorText">We couldn't find the product you're looking for.</p>
+            <a href="{{ url_for('read_root') }}" class="btn btn-primary">
+                <i class="bi bi-arrow-left"></i> Back to Products
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

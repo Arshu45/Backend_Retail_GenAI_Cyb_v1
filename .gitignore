@@ -1,0 +1,30 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+
+# --- Environment & Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Database & Persistence ---
+data/vector_db/
+*.db
+*.sqlite3
+
+# --- IDEs ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+
+# --- Tool Specific ---
+.gemini/
