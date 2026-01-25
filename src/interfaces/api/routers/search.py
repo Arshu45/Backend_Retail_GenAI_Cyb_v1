@@ -67,7 +67,6 @@ async def search(
             response_text=response_text,
             session_id=request.session_id,
             products=formatted_products,
-            recommended_products=[],
             follow_up_questions=follow_up_questions,
             metadata={
                 "session_id": request.session_id,
@@ -82,7 +81,6 @@ async def search(
         return SearchResponse(
             response_text="Something went wrong. Please try again.",
             products=[],
-            recommended_products=[],
             follow_up_questions=[],
             metadata={},
             success=False,

@@ -76,5 +76,4 @@ app.include_router(products.router, prefix="/api/v1")
 app.include_router(categories.router, prefix="/api/v1")
 app.include_router(filters.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
-# app.include_router(sessions.router)  # Session management APIs
 logger.info("Application startup complete")

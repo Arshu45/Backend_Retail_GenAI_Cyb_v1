@@ -8,7 +8,6 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_classic.agents import create_react_agent, AgentExecutor
 from langchain_classic.memory.buffer_window import ConversationBufferWindowMemory
@@ -18,7 +17,6 @@ from src.agents.tools.product_search_tool import create_product_search_tool
 from src.application.services.product_search_service import ProductSearchService
 from src.config.settings import settings
 from src.config.logging_config import get_logger
-from src.infrastructure.llm.prompts import RECOMMENDATION_PROMPT
 
 load_dotenv()
 logger = get_logger(__name__)
@@ -98,12 +96,10 @@ class AgentService:
         template = """You are a helpful E-commerce Shopping Assistant. Your goal is to help users find products from our catalog.
 
 CONVERSATION LOGIC:
-1. If the user asks for products, ALWAYS use the `search_products` tool.
-2. If the tool returns products, look at their `stock_status`. 
-3. If the user asks for "in stock" items, perform a "Thought" step to filter the results from the observation. 
-   Do NOT attempt to use a tool for filtering. 
-   If no items match the filter, state that clearly in your Final Answer.
-4. If you cannot find exactly what the user wants after one or two searches, provide the best available matches and explain the situation. Do not loop endlessly.
+1. CHITCHAT: If the user greets you (hi, hello, etc.) or asks a general question that doesn't require a product search, do NOT use any tools. Respond directly.
+2. SEARCH: If the user asks for products, ALWAYS use the `search_products` tool.
+3. FILTERING: If the tool returns products, look at their `stock_status`. If the user specifically asked for "in stock" items, filter the results in your Thought process. 
+4. LIMITS: If you cannot find matches after two searches, provide the best available matches. Do not loop.
 
 TOOLS:
 {tools}
@@ -119,9 +115,10 @@ Thought: I now know the final answer
 Final Answer: the final answer to the original input question
 
 IMPORTANT:
+- If no tool is needed for the user's request, skip the 'Action:' and 'Action Input:' lines entirely and go straight from 'Thought:' to 'Final Answer:'.
+- NEVER use 'Action: None'. If you aren't searching, you aren't taking an Action.
 - Every 'Action:' MUST be followed by an 'Action Input:'.
-- If you have enough information, go straight to 'Final Answer:'.
-- Do not make up product details. Only use what is provided in 'Observation:'.
+- Use the 'Final Answer:' to speak to the user.
 
 Previous conversation history:
 {chat_history}
@@ -146,7 +143,7 @@ Thought: {agent_scratchpad}"""
             verbose=True,
             handle_parsing_errors=True,
             return_intermediate_steps=True,
-            output_key="output"  # Fixes multiple output keys warning
+            output_key="output"
         )
         
         self.sessions[session_id] = executor
@@ -210,7 +207,7 @@ Thought: {agent_scratchpad}"""
             return messages
         return []
 
-    def generate_response(self, query: str, session_id: str = "default") -> dict:
+    def generate_response(self, query: str, session_id: str) -> dict:
         """
         Generate chatbot response using LLM agent with session memory.
         
@@ -277,162 +274,3 @@ Thought: {agent_scratchpad}"""
             f"I apologize, but I'm having trouble processing your query: '{query}'. "
             "Please try again or rephrase your question."
         )
-    
-    def generate_recommendations(
-        self, 
-        query: str, 
-        products: list
-    ) -> dict:
-        """
-        Generate structured recommendations using LLM with system prompt.
-        
-        Args:
-            query: User search query
-            products: List of product dictionaries with document and metadata
-            
-        Returns:
-            Dictionary with response_text, recommended_product_ids, reasoning, follow_up_questions
-        """
-        if not self.llm:
-            return self._get_fallback_recommendations(query, products)
-        
-        if not products:
-            return {
-                "response_text": f"I couldn't find any products matching '{query}'. Please try different keywords.",
-                "recommended_product_ids": [],
-                "reasoning": "No products found",
-                "follow_up_questions": ["Would you like to try a different search?", "Can you provide more details about what you're looking for?"]
-            }
-        
-        try:
-            # Format products for LLM
-            formatted_products = []
-            for i, product in enumerate(products, 1):
-                try:
-                    doc = json.loads(product.get("document", "{}"))
-                    metadata = product.get("metadata", {})
-                    
-                    product_id = product.get("id", "")
-                    title = doc.get("title", "Unknown Product")
-                    price = metadata.get("price", 0)
-                    stock_status = str(metadata.get("stock_status", "")).replace("_", " ").title()
-                    age_group = metadata.get("age_group", "")
-                    
-                    # Format price with commas
-                    price_str = f"₹{int(price):,}" if price else "Price not available"
-                    
-                    # Build product string
-                    product_str = f"{i}. {product_id} - {title} ({price_str}, {stock_status}"
-                    if age_group:
-                        product_str += f", {age_group.upper()}"
-                    product_str += ")"
-                    
-                    formatted_products.append(product_str)
-                except Exception as e:
-                    logger.warning(f"Error formatting product for recommendation: {e}")
-                    continue
-            
-            if not formatted_products:
-                return self._get_fallback_recommendations(query, products)
-            
-            # System prompt
-            system_prompt = """You are a product recommendation assistant.
-
-RESPONSE FORMAT (JSON):
-{
-  "response_text": "Natural language summary highlighting the BEST match first",
-  "recommended_product_ids": ["PRD148", "PRD72", "PRD66", "PRD45", "PRD89"],  // ALL products, sorted by relevance
-  "reasoning": "Why these products match the query",
-  "follow_up_questions": ["Question 1?", "Question 2?"]
-}
-
-RULES:
-1. Include ALL retrieved products in recommended_product_ids (not just top 3)
-2. Sort products: in-stock first, then by relevance
-3. Mention stock status in response_text
-4. Highlight the #1 recommendation in response_text
-5. Include 2 follow-up questions
-6. Be concise but helpful
-7. Return ONLY valid JSON, no markdown or extra text"""
-
-            
-            # User prompt
-            user_prompt = f"""User Query: "{query}"
-
-Retrieved Products:
-{chr(10).join(formatted_products)}
-
-Generate recommendation response."""
-            
-            # Call LLM using LangChain format
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_prompt)
-            ]
-            
-            response = self.llm.invoke(messages)
-            response_text = response.content.strip()
-            
-            # Parse JSON response (handle markdown code blocks if present)
-            if response_text.startswith("```"):
-                # Remove markdown code blocks
-                response_text = re.sub(r"^```(?:json)?", "", response_text)
-                response_text = re.sub(r"```$", "", response_text)
-                response_text = response_text.strip()
-            
-            # Parse JSON
-            try:
-                result = json.loads(response_text)
-                
-                # Validate structure
-                if not isinstance(result, dict):
-                    raise ValueError("Response is not a dictionary")
-                
-                return {
-                    "response_text": result.get("response_text", ""),
-                    "recommended_product_ids": result.get("recommended_product_ids", []),
-                    "reasoning": result.get("reasoning", ""),
-                    "follow_up_questions": result.get("follow_up_questions", [])
-                }
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse LLM JSON response: {e}")
-                logger.error(f"Response text: {response_text}")
-                return self._get_fallback_recommendations(query, products)
-            
-        except Exception as e:
-            logger.error(f"Error generating recommendations: {str(e)}")
-            return self._get_fallback_recommendations(query, products)
-    
-    def _get_fallback_recommendations(self, query: str, products: list) -> dict:
-        """
-        Generate fallback recommendations when LLM fails.
-        
-        Args:
-            query: User search query
-            products: List of product dictionaries
-            
-        Returns:
-            Dictionary with fallback recommendations
-        """
-        if not products:
-            return {
-                "response_text": f"I couldn't find any products matching '{query}'. Please try different keywords.",
-                "recommended_product_ids": [],
-                "reasoning": "No products found",
-                "follow_up_questions": ["Would you like to try a different search?", "Can you provide more details?"]
-            }
-        
-        # Sort products: in-stock first
-        sorted_products = sorted(
-            products,
-            key=lambda p: (str(p.get("metadata", {}).get("stock_status", "")).lower() != "in stock", p.get("id", ""))
-        )
-        
-        recommended_ids = [p.get("id", "") for p in sorted_products[:3] if p.get("id")]
-        
-        return {
-            "response_text": f"I found {len(products)} product(s) matching '{query}'. Here are the top recommendations.",
-            "recommended_product_ids": recommended_ids,
-            "reasoning": "Products sorted by stock availability",
-            "follow_up_questions": ["Would you like to see more options?", "Do you need help with anything else?"]
-        }
