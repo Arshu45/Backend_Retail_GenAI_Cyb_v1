@@ -27,6 +27,8 @@ from src.interfaces.api.schemas.product import (
     ProductImageResponse,
 )
 
+from src.utils.temp_image_fallback import get_fallback_image_url, get_fallback_images
+
 router = APIRouter(prefix="/products", tags=["products"])
 
 
@@ -49,7 +51,7 @@ def get_primary_image_url(product_id: str, db: Session) -> Optional[str]:
     if image:
         return image.image_url
     else:
-        return None  # TODO: Implement fallback image logic
+        return get_fallback_image_url(product_id)
 
 
 def apply_attribute_filters(
@@ -410,8 +412,11 @@ async def get_product(product_id: str, db: Session = Depends(get_db)):
     
     # ⚠️ TEMPORARY: Use fallback images if DB is empty
     if not images:
-        # Fallback images temporarily disabled - need to implement fallback logic
-        images = []
+        from src.interfaces.api.schemas.product import ProductImageResponse
+        fallback_images = get_fallback_images(product_id, count=3)
+        images = [
+            ProductImageResponse(**img) for img in fallback_images
+        ]
 
     return ProductDetail(
         product_id=product.product_id,
