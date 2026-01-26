@@ -59,3 +59,15 @@ Price:
   - equal, exactly, exact, for → { "$eq": number }
 
 """
+# Follow-up questions prompt
+GENERATE_FOLLOW_UP_PROMPT = """You are an e-commerce shopping assistant. 
+Based on the current user query and your previous response, suggest 2-3 short, helpful follow-up questions or tags that the user might want to click next.
+
+Rules:
+1. Suggestions must be relevant to the context (e.g., if searching for dresses, suggest colors, price ranges, or specific styles).
+2. Output MUST be ONLY a JSON list of strings.
+3. Do NOT repeat the current query.
+4. If no products were found, suggest broadening the search or checking other categories.
+
+Format: ["Question 1", "Question 2"]
+"""

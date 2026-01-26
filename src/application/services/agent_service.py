@@ -15,6 +15,8 @@ from langsmith import Client
 
 from src.agents.tools.product_search_tool import create_product_search_tool
 from src.application.services.product_search_service import ProductSearchService
+from src.infrastructure.llm.groq_client import get_groq_client
+from src.infrastructure.llm.prompts import GENERATE_FOLLOW_UP_PROMPT
 from src.config.settings import settings
 from src.config.logging_config import get_logger
 
@@ -41,6 +43,9 @@ class AgentService:
                 groq_api_key=settings.groq_api_key,
                 temperature=0,
             )
+            
+            # Additional Groq client for JSON extraction tasks
+            self.groq_client = get_groq_client()
             
             # Create product search tool
             self.product_search_tool = create_product_search_tool(product_service)
@@ -261,6 +266,27 @@ Thought: {agent_scratchpad}"""
         except Exception as e:
             logger.error(f"Error generating agent response for session {session_id}: {str(e)}")
             return {"response_text": self._get_fallback_response(query), "products": []}
+    
+    def generate_follow_ups(self, query: str, response_text: str) -> list:
+        """
+        Generate dynamic follow-up questions using LLM.
+        
+        Args:
+            query: Original user query
+            response_text: LLM generated response
+            
+        Returns:
+            List of suggestion strings
+        """
+        try:
+            user_input = f"User Query: {query}\nAgent Response: {response_text}"
+            return self.groq_client.extract_json(
+                system_prompt=GENERATE_FOLLOW_UP_PROMPT,
+                user_query=user_input
+            )
+        except Exception as e:
+            logger.warning(f"Failed to generate dynamic follow-ups: {e}")
+            return []
     
     def _get_fallback_response(self, query: str) -> str:
         """

@@ -286,8 +286,15 @@ function addFollowUpQuestions(questions) {
 
   questions.forEach((question) => {
     const span = document.createElement("span");
-    span.className = "follow-up-tag";
+    span.className = "follow-up-question-btn";
     span.textContent = question;
+    span.onclick = () => {
+      const chatInput = document.getElementById("chatInput");
+      if (chatInput && !isChatLoading) {
+        chatInput.value = question;
+        sendChatMessage();
+      }
+    };
     followUpContainer.appendChild(span);
   });
 }

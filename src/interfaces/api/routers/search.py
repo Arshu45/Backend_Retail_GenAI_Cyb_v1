@@ -60,8 +60,15 @@ async def search(
                 logger.warning(f"Error formatting product result: {e}")
                 continue
         
-        # Generate follow-up questions
-        follow_up_questions = generate_follow_up_questions(agent_products)
+        # Generate dynamic follow-up questions
+        follow_up_questions = agent_service.generate_follow_ups(
+            query=request.query,
+            response_text=response_text
+        )
+        
+        # Fallback to static if dynamic fails or returns empty
+        if not follow_up_questions:
+            follow_up_questions = generate_follow_up_questions(agent_products)
 
         return SearchResponse(
             response_text=response_text,
