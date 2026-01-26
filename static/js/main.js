@@ -46,10 +46,9 @@ async function sendChatMessage() {
   const loadingId = addChatMessage("", "bot", true);
 
   try {
-    // Build request with session_id for conversation continuity
-    const requestBody = { query: query };
-    if (currentSessionId) {
-      requestBody.session_id = currentSessionId;
+    // Ensure we have a session before sending
+    if (!currentSessionId) {
+      await createNewSession();
     }
 
     const response = await fetch("/api/v1/search", {
@@ -57,7 +56,10 @@ async function sendChatMessage() {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify({
+        query: query,
+        session_id: currentSessionId
+      }),
     });
 
     const data = await response.json();
@@ -202,7 +204,7 @@ function addProductsToChat(products) {
         : "";
 
     productsHtml += `
-      <div class="chat-product-card" onclick="window.location.href='/product/${product.id}'">
+      <div class="chat-product-card" onclick="window.open('/product/${product.id}', '_blank')">
         <div class="chat-product-title">${escapeHtml(product.title)}</div>
         <div class="chat-product-price">${escapeHtml(product.price)}</div>
         ${featuresHtml}
@@ -316,9 +318,6 @@ function updateSessionIndicator() {
       <div class="session-active text-muted small d-flex align-items-center gap-2">
         <i class="bi bi-chat-dots-fill text-success"></i>
         <span>Turn ${conversationTurnCount}</span>
-        <button class="btn btn-sm p-0 ms-2" onclick="startNewConversation()" title="Start new conversation">
-          <i class="bi bi-arrow-clockwise"></i>
-        </button>
       </div>
     `;
     indicator.classList.add("active");
@@ -333,10 +332,24 @@ function updateSessionIndicator() {
   }
 }
 
-function startNewConversation() {
-  // Reset session state
-  currentSessionId = null;
-  conversationTurnCount = 0;
+async function startNewConversation() {
+  // Delete old session on backend if it exists
+  if (currentSessionId) {
+    try {
+      await fetch(`/api/v1/sessions/${currentSessionId}`, {
+        method: "DELETE"
+      });
+      console.log("Deleted old session:", currentSessionId);
+    } catch (error) {
+      console.error("Error deleting session:", error);
+    }
+  }
+  
+  // Clear localStorage
+  localStorage.removeItem("chatSessionId");
+  
+  // Create new session
+  await createNewSession();
   
   // Clear chat messages
   const chatMessages = document.getElementById("chatMessages");
@@ -372,6 +385,99 @@ function startNewConversation() {
 
 function initializeSessionUI() {
   updateSessionIndicator();
+}
+
+// ============================================
+// SESSION CREATION & RESTORATION
+// ============================================
+
+async function createNewSession() {
+  try {
+    const response = await fetch("/api/v1/sessions", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"}
+    });
+    
+    if (!response.ok) {
+      throw new Error("Failed to create session");
+    }
+    
+    const data = await response.json();
+    currentSessionId = data.session_id;
+    conversationTurnCount = 0;
+    
+    // Persist to localStorage
+    localStorage.setItem("chatSessionId", currentSessionId);
+    
+    updateSessionIndicator();
+    console.log("Created new session:", currentSessionId);
+    
+    return currentSessionId;
+  } catch (error) {
+    console.error("Error creating session:", error);
+    // Fallback: generate client-side UUID
+    currentSessionId = generateClientSideUUID();
+    localStorage.setItem("chatSessionId", currentSessionId);
+    console.log("Using client-side session ID:", currentSessionId);
+    return currentSessionId;
+  }
+}
+
+async function restoreSession() {
+  const savedSessionId = localStorage.getItem("chatSessionId");
+  
+  if (savedSessionId) {
+    try {
+      // Verify session still exists on backend
+      const response = await fetch(`/api/v1/sessions/${savedSessionId}/history`);
+      
+      if (response.ok) {
+        currentSessionId = savedSessionId;
+        const history = await response.json();
+        conversationTurnCount = Math.floor(history.length / 2); // Each turn = user + bot message
+        
+        // Restore chat history in UI
+        restoreChatHistory(history);
+        updateSessionIndicator();
+        
+        console.log("Restored session:", currentSessionId, "with", conversationTurnCount, "turns");
+        return true;
+      } else {
+        // Session expired/not found, clear localStorage
+        console.log("Session not found on backend, clearing localStorage");
+        localStorage.removeItem("chatSessionId");
+        return false;
+      }
+    } catch (error) {
+      console.error("Error restoring session:", error);
+      localStorage.removeItem("chatSessionId");
+      return false;
+    }
+  }
+  
+  return false;
+}
+
+function restoreChatHistory(history) {
+  const chatMessages = document.getElementById("chatMessages");
+  if (!chatMessages || !history || history.length === 0) return;
+  
+  chatMessages.innerHTML = ""; // Clear welcome message
+  
+  history.forEach(msg => {
+    const type = msg.type === "human" ? "user" : "bot";
+    addChatMessage(msg.content, type, false, false);
+  });
+  
+  console.log("Restored", history.length, "messages from chat history");
+}
+
+function generateClientSideUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }
 
 // ============================================
@@ -1066,6 +1172,17 @@ function formatAttributeName(name) {
 
 document.addEventListener("DOMContentLoaded", async function () {
   // ============================
+  // SESSION INITIALIZATION
+  // ============================
+  // Try to restore existing session from localStorage
+  const sessionRestored = await restoreSession();
+  
+  // If no session restored, create new one
+  if (!sessionRestored) {
+    await createNewSession();
+  }
+  
+  // ============================
   // CHAT INITIALIZATION
   // ============================
   const chatToggleBtn = document.getElementById("chatToggleBtn");
@@ -1149,8 +1266,8 @@ document.addEventListener("DOMContentLoaded", async function () {
     const pathParts = window.location.pathname.split("/");
     const productId = pathParts[pathParts.length - 1];
 
-    if (productId && productId !== "product.html") {
-      loadProductDetails(productId);
+    if (productId && productId !== "product" && !productId.endsWith(".html")) {
+      await loadProductDetails(productId);
     }
   }
 
