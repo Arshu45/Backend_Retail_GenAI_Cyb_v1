@@ -30,6 +30,18 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+### 4. Ingest Data into ChromaDB
+Run the standalone script to ingest product data into the vector database:
+```bash
+python ingestion/scripts/ingest.py
+```
+
+### 5. Ingest Data into PostgreSQL
+Run the script to insert product and category data into the relational database:
+```bash
+python ingestion/scripts/test_ecommerce_db.py
+```
+
 ---
 
 ## ⚙️ Configuration

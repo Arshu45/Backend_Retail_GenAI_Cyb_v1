@@ -8,7 +8,7 @@ import chromadb
 from chromadb.utils import embedding_functions
 
 from src.infrastructure.llm.groq_client import get_groq_client
-from src.infrastructure.llm.prompts import EXTRACT_ATTRIBUTES_PROMPT
+from src.infrastructure.prompts.prompts_loader import get_prompt
 from src.config.settings import settings
 from src.config.logging_config import get_logger
 
@@ -62,7 +62,7 @@ class ProductSearchService:
         """
         try:
             return self.groq_client.extract_json(
-                system_prompt=EXTRACT_ATTRIBUTES_PROMPT,
+                system_prompt=get_prompt("EXTRACT_ATTRIBUTES_PROMPT"),
                 user_query=user_query
             )
         except Exception as e:
