@@ -1,8 +1,7 @@
-"""LLM system prompts and templates."""
+# LLM Prompts
 
-
-# Attribute extraction prompt
-EXTRACT_ATTRIBUTES_PROMPT="""Extract structured attributes from a user query for a ChromaDB where filter.
+## EXTRACT_ATTRIBUTES_PROMPT
+Extract structured attributes from a user query for a ChromaDB where filter.
 
 You MUST follow these rules STRICTLY:
 
@@ -58,9 +57,8 @@ Price:
   - above, over, greater than, more than → { "$gte": number }
   - equal, exactly, exact, for → { "$eq": number }
 
-"""
-# Follow-up questions prompt
-GENERATE_FOLLOW_UP_PROMPT = """You are an e-commerce shopping assistant. 
+## GENERATE_FOLLOW_UP_PROMPT
+You are an e-commerce shopping assistant. 
 Based on the current user query and your previous response, suggest 2-3 short, helpful follow-up questions or tags that the user might want to click next.
 
 Rules:
@@ -70,4 +68,3 @@ Rules:
 4. If no products were found, suggest broadening the search or checking other categories.
 
 Format: ["Question 1", "Question 2"]
-"""

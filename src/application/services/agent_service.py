@@ -16,7 +16,7 @@ from langsmith import Client
 from src.agents.tools.product_search_tool import create_product_search_tool
 from src.application.services.product_search_service import ProductSearchService
 from src.infrastructure.llm.groq_client import get_groq_client
-from src.infrastructure.llm.prompts import GENERATE_FOLLOW_UP_PROMPT
+from src.infrastructure.prompts.prompts_loader import get_prompt
 from src.config.settings import settings
 from src.config.logging_config import get_logger
 
@@ -281,7 +281,7 @@ Thought: {agent_scratchpad}"""
         try:
             user_input = f"User Query: {query}\nAgent Response: {response_text}"
             return self.groq_client.extract_json(
-                system_prompt=GENERATE_FOLLOW_UP_PROMPT,
+                system_prompt=get_prompt("GENERATE_FOLLOW_UP_PROMPT"),
                 user_query=user_input
             )
         except Exception as e:
