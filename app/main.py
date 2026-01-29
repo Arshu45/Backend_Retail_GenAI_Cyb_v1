@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import os
 from src.config.settings import settings
-from src.config.logging_config import setup_logging, get_logger
+from src.config.logger import setup_logging, get_logger
 from src.interfaces.api.middleware import setup_middleware
 from src.interfaces.api.dependencies import init_services
 from src.interfaces.api.routers import health, search, products, categories, filters, sessions

@@ -9,7 +9,7 @@ from groq import Groq
 from groq import APIConnectionError, RateLimitError, InternalServerError
 
 from src.config.settings import settings
-from src.config.logging_config import get_logger
+from src.config.logger import get_logger
 
 load_dotenv()
 logger = get_logger(__name__)

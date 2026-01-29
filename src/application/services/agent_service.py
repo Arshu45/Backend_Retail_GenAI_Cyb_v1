@@ -18,7 +18,7 @@ from src.application.services.product_search_service import ProductSearchService
 from src.infrastructure.llm.groq_client import get_groq_client
 from src.infrastructure.prompts.prompts_loader import get_prompt
 from src.config.settings import settings
-from src.config.logging_config import get_logger
+from src.config.logger import get_logger
 
 load_dotenv()
 logger = get_logger(__name__)

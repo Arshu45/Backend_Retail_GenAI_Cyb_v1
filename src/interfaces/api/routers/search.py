@@ -11,7 +11,7 @@ from src.interfaces.api.dependencies import (
 from src.application.services.product_search_service import ProductSearchService
 from src.application.services.agent_service import AgentService
 from src.utils.formatters import format_price, extract_key_features, generate_follow_up_questions
-from src.config.logging_config import get_logger
+from src.config.logger import get_logger
 
 logger = get_logger(__name__)
 
