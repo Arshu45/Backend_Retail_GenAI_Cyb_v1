@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 
-DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/test_ecommerce_db"
+DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/ecommerce_db"
 
 CSV_PATH = r"/Users/arsh/Downloads/POC_Ecom_Agent_1/data/catalog_corrected.csv"
 
