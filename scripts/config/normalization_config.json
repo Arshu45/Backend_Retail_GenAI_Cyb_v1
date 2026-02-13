@@ -1,0 +1,231 @@
+{
+  "schema_version": "1.0",
+  "import_mode": "config_only",
+  "output_schema": [
+    {
+      "name": "product_id",
+      "aliases": [
+        "entity_id",
+        "product_id",
+        "id",
+        "item_id"
+      ],
+      "transform": "safe_int"
+    },
+    {
+      "name": "sku",
+      "aliases": [
+        "sku",
+        "item_sku",
+        "product_sku",
+        "item_code"
+      ],
+      "transform": "clean_text"
+    },
+    {
+      "name": "title",
+      "aliases": [
+        "name",
+        "title",
+        "product_name",
+        "item_name"
+      ],
+      "transform": "clean_text"
+    },
+    {
+      "name": "description",
+      "aliases": [
+        "description",
+        "desc",
+        "product_description",
+        "long_description"
+      ],
+      "transform": "strip_html"
+    },
+    {
+      "name": "categories",
+      "aliases": [
+        "category_ids",
+        "categories",
+        "category",
+        "product_category"
+      ],
+      "transform": "clean_text"
+    },
+    {
+      "name": "price",
+      "aliases": [
+        "price",
+        "selling_price",
+        "regular_price",
+        "base_price",
+        "mrp"
+      ],
+      "transform": "safe_float"
+    },
+    {
+      "name": "stock_status",
+      "aliases": [
+        "status",
+        "stock_status",
+        "product_status",
+        "availability"
+      ],
+      "transform": "normalize_status"
+    },
+    {
+      "name": "created_at",
+      "aliases": [
+        "created_at",
+        "created"
+      ],
+      "transform": "safe_date"
+    },
+    {
+      "name": "updated_at",
+      "aliases": [
+        "updated_at",
+        "updated",
+        "modified"
+      ],
+      "transform": "safe_date"
+    },
+    {
+      "name": "color",
+      "aliases": [
+        "base_colour",
+        "fashion_colour",
+        "color",
+        "colour"
+      ],
+      "transform": "lowercase",
+      "merge_strategy": "first_non_empty"
+    },
+    {
+      "name": "size",
+      "aliases": [
+        "size"
+      ],
+      "transform": "clean_text"
+    },
+    {
+      "name": "care_instruction",
+      "aliases": [
+        "care_instruction",
+        "care_instructions",
+        "washing_instructions"
+      ],
+      "transform": "strip_html"
+    },
+    {
+      "name": "product_type",
+      "aliases": [
+        "type_id",
+        "product_type",
+        "type"
+      ],
+      "transform": "lowercase"
+    }
+  ],
+  "transformations": {
+    "clean_text": {
+      "description": "Strip whitespace and convert empty strings to null",
+      "operations": [
+        "trim",
+        "empty_to_null"
+      ]
+    },
+    "strip_html": {
+      "description": "Remove HTML tags and clean whitespace",
+      "operations": [
+        "html_strip",
+        "trim",
+        "empty_to_null"
+      ]
+    },
+    "safe_float": {
+      "description": "Convert to float, return null on failure",
+      "operations": [
+        "to_float",
+        "null_on_error"
+      ]
+    },
+    "safe_int": {
+      "description": "Convert to integer, return null on failure",
+      "operations": [
+        "to_int",
+        "null_on_error"
+      ]
+    },
+    "safe_date": {
+      "description": "Parse date to ISO format (YYYY-MM-DD)",
+      "operations": [
+        "parse_date",
+        "format_iso",
+        "null_on_error"
+      ],
+      "date_formats": [
+        "%m/%d/%Y %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%d/%m/%Y"
+      ]
+    },
+    "lowercase": {
+      "description": "Convert to lowercase",
+      "operations": [
+        "trim",
+        "to_lowercase",
+        "empty_to_null"
+      ]
+    },
+    "normalize_status": {
+      "description": "Normalize to in_stock or out_of_stock",
+      "operations": [
+        "trim",
+        "to_lowercase",
+        "map_values"
+      ],
+      "value_mapping": {
+        "enabled": "in_stock",
+        "active": "in_stock",
+        "1": "in_stock",
+        "true": "in_stock",
+        "in stock": "in_stock",
+        "available": "in_stock",
+        "default": "out_of_stock"
+      }
+    },
+    "calculate_discount": {
+      "description": "Calculate discount from price and sale_price",
+      "operations": [
+        "subtract",
+        "round_2_decimals",
+        "positive_only"
+      ]
+    }
+  },
+  "special_rules": {
+    "sale_price_derivation": {
+      "condition_field": "item_price_status",
+      "condition_value": "markdown",
+      "action": "copy_from_price"
+    },
+    "color_merge": {
+      "fields": [
+        "base_colour",
+        "fashion_colour",
+        "color"
+      ],
+      "strategy": "first_non_empty",
+      "transform": "lowercase"
+    }
+  },
+  "encoding": {
+    "input": [
+      "utf-8",
+      "latin-1"
+    ],
+    "output": "utf-8"
+  }
+}

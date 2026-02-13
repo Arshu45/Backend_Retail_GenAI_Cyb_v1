@@ -1,9 +1,15 @@
 import os
+import sys
 import csv
 import json
 import time
 from collections import defaultdict
 from typing import Dict, Optional
+
+# Add project root to Python path for src imports
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, project_root)
+
 from src.utils.value_parsers import is_number, is_date
 from datetime import datetime
 from dotenv import load_dotenv
@@ -69,7 +75,7 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
 
     for col in all_columns:
 
-        # âœ… Pure numeric â†’ number_range
+        # ✅ Pure numeric → number_range
         if numeric_count[col] > 0 and string_count[col] == 0:
             schema[col] = {
                 "type": "number_range",
@@ -79,7 +85,7 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
             }
             continue
 
-        # âœ… Pure date â†’ date
+        # ✅ Pure date → date
         if date_count[col] > 0 and numeric_count[col] == 0 and string_count[col] == 0:
             schema[col] = {
                 "type": "date",
@@ -89,7 +95,7 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
             }
             continue
 
-        # âœ… Enum â†’ low cardinality strings
+        # ✅ Enum → low cardinality strings
         if 0 < len(column_values[col]) <= ENUM_MAX_UNIQUE_VALUES:
             schema[col] = {
                 "type": "enum",
@@ -99,7 +105,7 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
             }
             continue
 
-        # âœ… Fallback â†’ free text
+        # ✅ Fallback → free text
         schema[col] = {
             "type": "string",
             "rules": {
@@ -114,12 +120,12 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
 
     elapsed = time.time() - start_time
 
-    print("âœ… Schema generation completed")
-    print(f"ðŸ”¢ Total attributes: {len(schema)}")
-    print(f"â�± Time taken: {elapsed:.4f} seconds")
+    print("✅ Schema generation completed")
+    print(f"🔢 Total attributes: {len(schema)}")
+    print(f"⏱ Time taken: {elapsed:.4f} seconds")
 
     if output_schema_path:
-        print(f"ðŸ“� Schema written to: {output_schema_path}")
+        print(f"📁 Schema written to: {output_schema_path}")
 
     #return schema
 
