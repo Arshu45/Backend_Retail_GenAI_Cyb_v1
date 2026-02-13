@@ -1,10 +1,10 @@
 # LLM Prompts
 
 ## EXTRACT_ATTRIBUTES_PROMPT
+
 Extract structured attributes from a user query for a ChromaDB where filter.
 
 You MUST follow these rules STRICTLY:
-
 1. Output MUST be a single, complete, valid JSON object.
 2. Output ONLY JSON. No markdown, explanations, or comments.
 3. All string values MUST be lowercase.
@@ -14,48 +14,81 @@ You MUST follow these rules STRICTLY:
 7. Do NOT include keys with null values.
 8. The JSON must be valid and complete (no truncation).
 
-Allowed keys (include ONLY if explicitly present in query):
-- color (string)
-- occasion (string)
-- gender (string)
-- age (object with ONLY ONE operator OR range)
-- price (object with ONLY ONE operator)
+Allowed attributes schema (authoritative, do NOT invent keys):
+{attribute_schema}
 
-Strict attribute rules:
+NUMBER_RANGE ATTRIBUTE RULES (GENERIC)
+====================================
+These rules apply to ALL attributes whose type is "number_range" in attribute_schema
+(e.g., age, price, gsm, garment_length_cm, garment_chest_cm, etc.).
 
-Color:
-- Extract ONLY if a real color name is present (e.g., red, blue, yellow).
-- Do NOT treat occasions, events, or adjectives as colors.
+1. Extract a number_range attribute ONLY if a numeric value is explicitly mentioned in the user query.
+2. NEVER infer numeric values from context or product type.
+3. Use ONLY the operators allowed by the schema.
+4. Use ONLY ONE operator per attribute, EXCEPT for explicit ranges.
+5. Valid operator mapping:
 
-Occasion:
-- Extract ONLY if explicitly stated (e.g., birthday, party, wedding, festive, casual).
+   - "under X", "below X", "less than X", "upto X", "up to X"
+     → {{ "$lte": X }}
 
-Gender:
-- Extract ONLY if explicitly stated.
-- Normalize:
-  - girl, girls, female, women, woman → "girls"
-  - boy, boys, male, men, man → "boys"
-- Words like "kids", "children", "child", "toddler", "infant" are NOT genders.
-- **NEVER output gender as "kids" or "children".**
-- If the word "kids" or "children" appears, DO NOT output gender.
+   - "above X", "over X", "greater than X", "more than X"
+     → {{ "$gte": X }}
 
-Age:
-- Extract ONLY if an age is explicitly mentioned.
-- Age MUST be numeric.
-- Do NOT output age_group strings.
-- Use ONLY ONE operator:
-  - “X year old”, “age X”, “for X yr”, “X y/o” → { "$eq": X }
-  - “under X years”, “below X years”, “less than X years” → { "$lt": X }
-  - “above X years”, “over X years”, “greater than X years” → { "$gt": X }
-  - “X-Y year old”, “between X and Y years” → { "$gte": X, "$lte": Y }
-- If age is ambiguous or inferred, OMIT age.
+   - "exactly X", "equal to X", "for X", "price X"
+     → {{ "$eq": X }}
 
-Price:
-- Extract ONLY if explicitly mentioned.
-- Use ONLY ONE operator:
-  - under, below, less than, upto, up to → { "$lte": number }
-  - above, over, greater than, more than → { "$gte": number }
-  - equal, exactly, exact, for → { "$eq": number }
+   - "between X and Y", "X-Y", "X to Y"
+     → {{ "$gte": X, "$lte": Y }}
+
+
+6. If multiple numbers appear but the intent is unclear, OMIT the attribute.
+7. If the number is not explicitly tied to an attribute, OMIT the attribute.
+
+========================
+ATTRIBUTE EXTRACTION GUARANTEE
+========================
+An attribute may be extracted ONLY if:
+- the attribute exists in attribute_schema
+- AND its value appears verbatim in the user query
+
+Otherwise, the attribute MUST be omitted.
+
+========================
+ENUM RULES (CRITICAL)
+========================
+1. Enum values MUST be matched ONLY to their OWN attribute.
+2. NEVER assign a value to a different attribute even if it "sounds correct".
+3. Example violations (DO NOT DO THIS):
+   - "solid" → brand
+   - "party dress" → occasion
+
+========================
+OUTPUT VALUE FORMAT (CRITICAL)
+========================
+For each extracted attribute:
+- Output ONLY the raw value (string or number).
+- NEVER output objects, schema fragments, or rule definitions.
+- NEVER include "type", "rules", or "values" in the output.
+
+========================
+NO DEFAULTS / NO COMPLETION
+========================
+The model MUST NOT fill or complete attributes based on:
+- typical product defaults
+- common clothing properties
+- catalog completeness
+- assumptions about children or dresses
+
+If a value does NOT appear verbatim in the user query,
+the attribute MUST NOT be extracted.
+
+========================
+CHILD / KID TERMS
+========================
+Words like "kid", "kids", "child", "children", "toddler":
+- Do NOT map to gender
+- Do NOT infer age, size, safety, fabric, lining, fit, or compliance
+- Do NOT trigger any child-specific attributes
 
 ## GENERATE_FOLLOW_UP_PROMPT
 You are an e-commerce shopping assistant. 
@@ -78,7 +111,6 @@ CONVERSATION LOGIC:
 3. FILTERING & STOCK: 
    - DO NOT filter out products based on `stock_status` unless the user explicitly used keywords like "in stock" or "available". 
    - If the user did NOT specify "in stock", you must present all products returned by the tool (including "out of stock" and "low stock" items) so the user is aware of our full catalog.
-4. LIMITS: If you cannot find matches after two searches, provide the best available matches. Do not loop.
 
 TOOLS:
 {tools}

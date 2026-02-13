@@ -1,0 +1,449 @@
+{
+  "embellishment": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "bow",
+        "lace",
+        "none",
+        "ruffles",
+        "sequins"
+      ]
+    }
+  },
+  "garment_chest_cm": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "weight": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "lightweight",
+        "normal"
+      ]
+    }
+  },
+  "color": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "blue",
+        "maroon",
+        "mint green",
+        "peach",
+        "pink",
+        "yellow"
+      ]
+    }
+  },
+  "discount_percent": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "wash_care": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "dry clean",
+        "hand wash",
+        "machine wash"
+      ]
+    }
+  },
+  "primary_fabric": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "cotton",
+        "net",
+        "polyester",
+        "rayon",
+        "satin",
+        "tulle"
+      ]
+    }
+  },
+  "gsm": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "fit_type": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "a-line",
+        "flared",
+        "regular"
+      ]
+    }
+  },
+  "color_family": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "bright",
+        "neutral",
+        "pastel"
+      ]
+    }
+  },
+  "safety_compliance": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "child-safe materials"
+      ]
+    }
+  },
+  "surface_styling": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "layered",
+        "none",
+        "pleated",
+        "smocked"
+      ]
+    }
+  },
+  "neckline": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "peter pan",
+        "round",
+        "square",
+        "v-neck"
+      ]
+    }
+  },
+  "sleeves": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "cap sleeve",
+        "puff sleeve",
+        "short sleeve",
+        "sleeveless"
+      ]
+    }
+  },
+  "transparency": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "opaque",
+        "semi-sheer"
+      ]
+    }
+  },
+  "pattern": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "cartoon print",
+        "floral",
+        "polka dot",
+        "solid"
+      ]
+    }
+  },
+  "mrp": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "currency": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "inr"
+      ]
+    }
+  },
+  "attribute_confidence_score": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "size_fit_advice": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "runs large",
+        "runs small",
+        "true to size"
+      ]
+    }
+  },
+  "stock_status": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "in stock",
+        "low stock",
+        "out of stock"
+      ]
+    }
+  },
+  "length": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "ankle length",
+        "knee length",
+        "midi"
+      ]
+    }
+  },
+  "gender": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "girls"
+      ]
+    }
+  },
+  "price": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "brand": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "allen solly junior",
+        "cutie couture",
+        "h&m kids",
+        "hopscotch",
+        "pepe jeans junior"
+      ]
+    }
+  },
+  "breathability": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "high",
+        "medium"
+      ]
+    }
+  },
+  "shoulder_width_cm": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "waist_type": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "adjustable",
+        "elastic",
+        "fixed"
+      ]
+    }
+  },
+  "lining": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "fully lined",
+        "partially lined",
+        "unlined"
+      ]
+    }
+  },
+  "skin_friendly": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "no",
+        "yes"
+      ]
+    }
+  },
+  "age_group": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "2-3y",
+        "3-4y",
+        "4-5y",
+        "5-6y",
+        "6-7y",
+        "7-8y"
+      ]
+    }
+  },
+  "secondary_fabric": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "cotton",
+        "net",
+        "polyester",
+        "rayon",
+        "satin",
+        "tulle"
+      ]
+    }
+  },
+  "occasion": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "birthday",
+        "casual",
+        "festive",
+        "party"
+      ]
+    }
+  },
+  "fabric_stretch": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "mild stretch",
+        "no stretch"
+      ]
+    }
+  },
+  "hemline": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "flared",
+        "high-low",
+        "straight"
+      ]
+    }
+  },
+  "durability": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "high",
+        "medium"
+      ]
+    }
+  },
+  "size": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "2y",
+        "3y",
+        "4y",
+        "5y",
+        "6y",
+        "7y"
+      ]
+    }
+  },
+  "product_type": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "casual dress",
+        "dress",
+        "frock",
+        "party dress"
+      ]
+    }
+  },
+  "product_id": {
+    "type": "string",
+    "rules": {
+      "description": "free text attribute"
+    }
+  },
+  "color_fastness": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  },
+  "closure_type": {
+    "type": "enum",
+    "rules": {
+      "values": [
+        "button",
+        "elastic waist",
+        "zip"
+      ]
+    }
+  },
+  "garment_length_cm": {
+    "type": "number_range",
+    "rules": {
+      "operators": [
+        "$eq",
+        "$lt",
+        "$gt",
+        "$gte",
+        "$lte"
+      ]
+    }
+  }
+}

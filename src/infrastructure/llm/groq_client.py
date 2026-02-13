@@ -105,7 +105,7 @@ class GroqClient:
             {"role": "user", "content": user_query}
         ]
         
-        raw_response = self.chat_completion(messages, max_retries=max_retries)
+        raw_response = self.chat_completion(messages, temperature=0, max_retries=max_retries)
         
         try:
             return json.loads(raw_response)

@@ -11,6 +11,7 @@ from src.infrastructure.llm.groq_client import get_groq_client
 from src.infrastructure.prompts.prompts_loader import get_prompt
 from src.config.settings import settings
 from src.config.logger import get_logger
+from src.config.csv_schema_loader import get_attribute_schema
 
 logger = get_logger(__name__)
 
@@ -61,8 +62,12 @@ class ProductSearchService:
         Uses Groq LLM to extract structured filters.
         """
         try:
+            CATALOG_NAME = os.getenv("COLLECTION_NAME")
+            ATTRIBUTE_SCHEMA = get_attribute_schema(CATALOG_NAME)
+            # logger.info(f"ATTRIBUTE_SCHEMA: {ATTRIBUTE_SCHEMA} ")
+
             return self.groq_client.extract_json(
-                system_prompt=get_prompt("EXTRACT_ATTRIBUTES_PROMPT"),
+                system_prompt=get_prompt("EXTRACT_ATTRIBUTES_PROMPT").format(attribute_schema=json.dumps(ATTRIBUTE_SCHEMA, indent=2)),
                 user_query=user_query
             )
         except Exception as e:
@@ -170,7 +175,7 @@ class ProductSearchService:
                         "distance": results["distances"][0][i] if results.get("distances") and results["distances"][0] else None
                     }
                     products.append(product)
-            
+            # print(json.dumps(products, indent=2, ensure_ascii=False))
             return products
             
         except Exception as e:

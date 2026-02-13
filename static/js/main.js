@@ -1033,7 +1033,7 @@ async function loadProductDetails(productId) {
   const errorMessage = document.getElementById("errorMessage");
 
   try {
-    const response = await fetch(`/api/v1/products/${productId}`);
+    const response = await fetch(`/api/v1/products/${productId.toUpperCase()}`);
 
     if (!response.ok) {
       throw new Error("Product not found");
@@ -1121,7 +1121,12 @@ async function loadProductDetails(productId) {
     if (attributesTable) {
       attributesTable.innerHTML = "";
 
-      if (product.attributes && product.attributes.length > 0) {
+      console.log("Product attributes:", product.attributes);
+      console.log("Attributes type:", typeof product.attributes);
+      console.log("Is array:", Array.isArray(product.attributes));
+      console.log("Length:", product.attributes?.length);
+
+      if (product.attributes && Array.isArray(product.attributes) && product.attributes.length > 0) {
         product.attributes.forEach((attr) => {
           const row = document.createElement("tr");
           row.innerHTML = `

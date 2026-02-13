@@ -1,8 +1,10 @@
 """Product search tool for LangChain agents."""
 
+import os
 import json
 from langchain_core.tools import tool
 from src.config.logger import get_logger
+from src.config.csv_schema_loader import get_attribute_schema
 
 logger = get_logger(__name__)
 
@@ -41,26 +43,30 @@ def create_product_search_tool(product_service):
                 })
             
             # Format products for agent
+            CATALOG_NAME = os.getenv("COLLECTION_NAME")
+            ATTRIBUTE_SCHEMA = get_attribute_schema(CATALOG_NAME)
             formatted_products = []
+            DOCUMENT_COLUMNS = {
+                col.strip().lower()
+                for col in os.getenv("DOCUMENT_COLUMNS", "").split(",")
+                if col.strip()
+            }
             for product in products:
                 try:
-                    doc = json.loads(product["document"])
-                    metadata = product["metadata"]
+                    doc = json.loads(product.get("document", "{}"))
+                    metadata = product.get("metadata", {})
                     
-                    formatted_product = {
-                        "title": doc.get("title", "Unknown Product"),
-                        "product_id": product.get("id", ""),
-                        "price": metadata.get("price", 0),
-                        "mrp": metadata.get("mrp", 0),
-                        "color": metadata.get("color", ""),
-                        "size": metadata.get("size", ""),
-                        "gender": metadata.get("gender", ""),
-                        "occasion": metadata.get("occasion", ""),
-                        "brand": metadata.get("brand", ""),
-                        "stock_status": metadata.get("stock_status", ""),
-                        "description": doc.get("embedding_text", "")
-                    }
+                    formatted_product = {}
+                    # ðŸ”¹ Document fields
+                    for field in DOCUMENT_COLUMNS:
+                        formatted_product[field] = doc.get(field, "")
+
+                    # ðŸ”¹ Metadata fields
+                    for attr_name, attr_schema in ATTRIBUTE_SCHEMA.items():
+                        formatted_product[attr_name] = metadata.get(attr_name, "")
+
                     formatted_products.append(formatted_product)
+
                 except Exception as e:
                     logger.warning(f"Error formatting product: {e}")
                     continue
