@@ -1,0 +1,19 @@
+{
+  "occasions": {
+    "birthday": {
+      "keywords": ["birthday","party","fun","costume","glitter","led","jacket","sparkle","sneakers","bow","alien"]
+    },
+    "wedding": {
+      "keywords": []
+    },
+    "baby_shower": {
+      "keywords": []
+    },
+    "anniversary": {
+      "keywords": []
+    },
+    "festival": {
+      "keywords": []
+    }
+  }
+}

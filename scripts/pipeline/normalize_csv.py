@@ -15,6 +15,10 @@ import numpy as np
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
+from logger_config import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -127,28 +131,24 @@ def get_first_non_empty(*values):
 
 
 def normalize_status(status, value_mapping=None):
-    """Normalize status field using value mapping"""
-    # Keep empty values as-is (don't modify the data)
+    """Normalize status field using value mapping from config JSON"""
+    # Keep empty values as-is
     if pd.isna(status) or status == '':
         return None
     
     status_lower = str(status).lower().strip()
     
     if value_mapping:
+        # Use config mapping; fall back to 'default' key, or keep original if neither exists
         return value_mapping.get(status_lower, value_mapping.get('default', status_lower))
     
-    # Default mapping - only normalize known values
-    if status_lower in ('enabled', 'active', '1', 'true', 'in stock', 'available'):
-        return 'in_stock'
-    elif status_lower in ('disabled', 'inactive', '0', 'false', 'out of stock', 'unavailable'):
-        return 'out_of_stock'
-    else:
-        # Keep original value if not recognized
-        return status_lower
+    # No mapping configured - return as-is
+    return status_lower
 
 
 def calculate_discount(price, sale_price):
     """Calculate discount value from price and sale_price"""
+
     if price is None or sale_price is None:
         return None
     
@@ -317,17 +317,15 @@ def main(input_csv, output_csv, config_path=None):
         config_path: Path to JSON config file (optional)
     """
     
-    # Load configuration
+    # Load configuration (config_path is required)
     if config_path is None:
-        # Default config path
-        script_dir = Path(__file__).parent
-        config_path = script_dir / 'normalization_config.json'
+        raise ValueError("Config path is required. This script must be run via pipeline.py")
     
-    print(f"Loading configuration from: {config_path}")
+    logger.debug(f"Loading configuration from: {config_path}")
     config = load_config(config_path)
-    print(f"✓ Loaded schema with {len(config['output_schema'])} fields")
+    logger.debug(f"Loaded schema with {len(config['output_schema'])} fields")
     
-    print(f"\nReading input CSV: {input_csv}")
+    logger.debug(f"Reading input CSV: {input_csv}")
     
     try:
         # Read CSV with flexible encoding
@@ -351,21 +349,21 @@ def main(input_csv, output_csv, config_path=None):
         print(f"Error reading input CSV: {e}")
         return 1
     
-    print("\nNormalizing data...")
+    logger.debug("Normalizing data...")
     
     try:
         # Normalize using config
         normalized_df = normalize_dataframe_from_config(df, config)
         
-        print(f"✓ Normalized to {len(normalized_df)} rows with {len(normalized_df.columns)} columns")
+        logger.debug(f"Normalized to {len(normalized_df)} rows with {len(normalized_df.columns)} columns")
         
-        # Show summary statistics
-        print("\n--- Summary Statistics ---")
+        # Show summary statistics in debug log
+        logger.debug("--- Summary Statistics ---")
         for field in config['output_schema']:
             field_name = field['name']
             if field_name in normalized_df.columns:
                 count = normalized_df[field_name].notna().sum()
-                print(f"{field_name:20} {count:>10,} ({count/len(normalized_df)*100:.1f}%)")
+                logger.debug(f"{field_name:20} {count:>10,} ({count/len(normalized_df)*100:.1f}%)")
         
     except Exception as e:
         print(f"Error during normalization: {e}")
@@ -373,18 +371,18 @@ def main(input_csv, output_csv, config_path=None):
         traceback.print_exc()
         return 1
     
-    print(f"\nWriting output CSV: {output_csv}")
+    logger.debug(f"Writing output CSV: {output_csv}")
     
     try:
         output_encoding = config.get('encoding', {}).get('output', 'utf-8')
         normalized_df.to_csv(output_csv, index=False, encoding=output_encoding)
-        print(f"Successfully wrote {len(normalized_df)} rows to {output_csv}")
+        logger.debug(f"Successfully wrote {len(normalized_df)} rows to {output_csv}")
         
     except Exception as e:
         print(f"Error writing output CSV: {e}")
         return 1
     
-    print("\n✅ Normalization complete!")
+    logger.debug("✅ Normalization complete!")
     return 0
 
 

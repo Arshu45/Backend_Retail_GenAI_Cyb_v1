@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 import json
 import chromadb
@@ -7,16 +8,13 @@ import re
 import ssl
 import numpy as np
 from dotenv import load_dotenv
+from logger_config import get_logger
 
-# =========================================================
-# LOAD ENV
-# =========================================================
+# Initialize logger
+logger = get_logger(__name__)
+
+# Module-level config (loaded at import time)
 load_dotenv()
-
-CSV_FILE_PATH = os.getenv("CSV_FILE_PATH")
-DB_DIR = os.path.abspath(os.getenv("CHROMA_DB_DIR"))
-COLLECTION_NAME = os.getenv("COLLECTION_NAME")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
 
 DOCUMENT_COLUMNS = [
     col.strip()
@@ -24,41 +22,25 @@ DOCUMENT_COLUMNS = [
     if col.strip()
 ]
 
-print("📄 Document columns:", DOCUMENT_COLUMNS)
-print("📂 CSV path:", CSV_FILE_PATH)
-print("🧠 Embedding model:", EMBEDDING_MODEL)
-print("📦 Collection:", COLLECTION_NAME)
-print("🗄️ DB dir:", DB_DIR)
+def print_usage():
+    print("""
+Usage: python chromadb_ingestion.py <csv_file_path>
 
-# ---- SSL FIX (Windows / Corp Network) ----
-ssl._create_default_https_context = ssl._create_unverified_context
-os.environ["REQUESTS_CA_BUNDLE"] = ""
+Arguments:
+  csv_file_path   Path to the normalized CSV file to ingest into ChromaDB
 
-os.makedirs(DB_DIR, exist_ok=True)
+Environment Variables (set in .env):
+  CHROMA_DB_DIR      Directory to store ChromaDB data
+  COLLECTION_NAME    Name of the ChromaDB collection
+  EMBEDDING_MODEL    SentenceTransformer model name (e.g. all-MiniLM-L6-v2)
+  DOCUMENT_COLUMNS   Comma-separated list of columns to use as document text
+  CSV_FILE_PATH      (Optional) Fallback CSV path if not passed as argument
 
-# =========================================================
-# LOAD CSV
-# =========================================================
-# df = pd.read_csv(CSV_FILE_PATH).fillna("")
-df = pd.read_csv(CSV_FILE_PATH, encoding='utf-8-sig', low_memory=False, skip_blank_lines=True)
-df.columns = df.columns.str.strip().str.lower()
-print("✅ Detected Columns:", df.columns.tolist())
-# =========================================================
-# EMBEDDING FUNCTION
-# =========================================================
-embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name=EMBEDDING_MODEL
-)
+Examples:
+  python chromadb_ingestion.py data/processed_data/normalized_products.csv
+  python chromadb_ingestion.py data/processed_data/normalized_products.csv --help
+""")
 
-# =========================================================
-# CHROMA CLIENT
-# =========================================================
-client = chromadb.PersistentClient(path=DB_DIR)
-
-collection = client.get_or_create_collection(
-    name=COLLECTION_NAME,
-    embedding_function=embedding_function
-)
 
 # =========================================================
 # NORMALIZATION
@@ -158,6 +140,15 @@ def build_metadata(row):
         if col in DOCUMENT_COLUMNS:
             continue
 
+        # TAGS HANDLING — split comma-separated string into a native list
+        # Enables ChromaDB $in filter: { "tags": { "$in": ["birthday"] } }
+        if col == "tags":
+            if val is not None and str(val).strip() not in ("", "nan"):
+                tag_list = [t.strip() for t in str(val).split(",") if t.strip()]
+                if tag_list:
+                    metadata["tags"] = tag_list  # e.g. ["birthday", "festival"]
+            continue
+
         normalized = normalize_value(val)
         if normalized is None:
             continue
@@ -179,33 +170,104 @@ def build_metadata(row):
 
 
 # =========================================================
-# INGEST (WITH BATCHING)
+# MAIN
 # =========================================================
-documents, metadatas, ids = [], [], []
+def main():
+    # =========================================================
+    # LOAD ENV & COMMAND-LINE ARGS
+    # =========================================================
+    load_dotenv()
 
-# 1. Build the lists
-for _, row in df.iterrows():
-    sku = str(row["sku"]).strip()
-    documents.append(build_document(row))
-    metadatas.append(build_metadata(row))
-    ids.append(sku)
+    if '--help' in sys.argv or '-h' in sys.argv:
+        print_usage()
+        sys.exit(0)
 
-# 2. Upload in batches
-BATCH_SIZE = 5000  # Staying safely under the 5461 limit
-total_records = len(ids)
+    # Accept CSV file path as command-line argument (fallback to .env)
+    csv_file_path = sys.argv[1] if len(sys.argv) > 1 else os.getenv("CSV_FILE_PATH")
+    db_dir = os.path.abspath(os.getenv("CHROMA_DB_DIR"))
+    collection_name = os.getenv("COLLECTION_NAME")
+    embedding_model = os.getenv("EMBEDDING_MODEL")
 
-print(f"🚀 Starting ingestion of {total_records} records...")
+    document_columns = [
+        col.strip()
+        for col in os.getenv("DOCUMENT_COLUMNS", "").split(",")
+        if col.strip()
+    ]
 
-for i in range(0, total_records, BATCH_SIZE):
-    batch_ids = ids[i : i + BATCH_SIZE]
-    batch_docs = documents[i : i + BATCH_SIZE]
-    batch_metas = metadatas[i : i + BATCH_SIZE]
-    
-    collection.add(
-        documents=batch_docs,
-        metadatas=batch_metas,
-        ids=batch_ids
+    if not csv_file_path:
+        print("❌ Error: CSV file path not provided")
+        print_usage()
+        sys.exit(1)
+
+    logger.debug(f"Document columns: {document_columns}")
+    logger.debug(f"CSV path: {csv_file_path}")
+    logger.debug(f"Embedding model: {embedding_model}")
+    logger.debug(f"Collection: {collection_name}")
+    logger.debug(f"DB dir: {db_dir}")
+
+    # ---- SSL FIX (Windows / Corp Network) ----
+    ssl._create_default_https_context = ssl._create_unverified_context
+    os.environ["REQUESTS_CA_BUNDLE"] = ""
+
+    os.makedirs(db_dir, exist_ok=True)
+
+    # =========================================================
+    # LOAD CSV
+    # =========================================================
+    # df = pd.read_csv(csv_file_path).fillna("")
+    df = pd.read_csv(csv_file_path, encoding='utf-8-sig', low_memory=False, skip_blank_lines=True)
+    df.columns = df.columns.str.strip().str.lower()
+    logger.debug(f"Detected columns: {df.columns.tolist()}")
+
+    # =========================================================
+    # EMBEDDING FUNCTION
+    # =========================================================
+    embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name=embedding_model
     )
-    print(f"✅ Progress: {min(i + BATCH_SIZE, total_records)} / {total_records} records stored.")
 
-print(f"\n🎉 Finished! Stored total {collection.count()} vectors in ChromaDB")
+    # =========================================================
+    # CHROMA CLIENT
+    # =========================================================
+    client = chromadb.PersistentClient(path=db_dir)
+
+    collection = client.get_or_create_collection(
+        name=collection_name,
+        embedding_function=embedding_function
+    )
+
+    # =========================================================
+    # INGEST (WITH BATCHING)
+    # =========================================================
+    documents, metadatas, ids = [], [], []
+
+    # 1. Build the lists
+    for _, row in df.iterrows():
+        product_id = str(row["product_id"]).strip()
+        documents.append(build_document(row))
+        metadatas.append(build_metadata(row))
+        ids.append(product_id)
+
+    # 2. Upload in batches
+    BATCH_SIZE = 5000  # Staying safely under the 5461 limit
+    total_records = len(ids)
+
+    logger.debug(f"Starting ingestion of {total_records} records...")
+
+    for i in range(0, total_records, BATCH_SIZE):
+        batch_ids = ids[i : i + BATCH_SIZE]
+        batch_docs = documents[i : i + BATCH_SIZE]
+        batch_metas = metadatas[i : i + BATCH_SIZE]
+
+        collection.add(
+            documents=batch_docs,
+            metadatas=batch_metas,
+            ids=batch_ids
+        )
+        logger.debug(f"Progress: {min(i + BATCH_SIZE, total_records)} / {total_records} records stored.")
+
+    logger.debug(f"Finished! Stored total {collection.count()} vectors in ChromaDB.")
+
+
+if __name__ == '__main__':
+    main()

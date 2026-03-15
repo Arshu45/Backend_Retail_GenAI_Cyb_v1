@@ -1,4 +1,6 @@
-"""Product schemas."""
+"""Product schemas.
+Migrated to flat schema (2026-02-13)
+"""
 
 from typing import Optional, List
 from pydantic import BaseModel, Field
@@ -11,19 +13,8 @@ class ProductImageResponse(BaseModel):
     """Product image schema."""
     id: int
     image_url: str
-    is_primary: bool
+    is_primary: int 
     display_order: int
-
-    class Config:
-        from_attributes = True
-
-
-class ProductAttributeResponse(BaseModel):
-    """Attribute values attached to a product."""
-    attribute_id: int
-    attribute_name: str
-    attribute_type: str
-    value: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -32,14 +23,17 @@ class ProductAttributeResponse(BaseModel):
 class ProductListItem(BaseModel):
     """Product list item schema."""
     product_id: str
+    sku: Optional[str] = None
     title: str
-    brand: Optional[str] = None
-    product_type: Optional[str] = None
-    price: float
-    mrp: Optional[float] = None
-    discount_percent: Optional[float] = None
-    currency: str
+    description: Optional[str] = None
+    price: Optional[str] = None  # Stored as VARCHAR in DB
     stock_status: Optional[str] = None
+    
+    # Direct attribute fields
+    color: Optional[str] = None
+    size: Optional[str] = None
+    product_type: Optional[str] = None
+    
     primary_image: Optional[str] = None
 
     class Config:
@@ -48,8 +42,8 @@ class ProductListItem(BaseModel):
 
 class ProductDetail(ProductListItem):
     """Detailed product schema."""
-    category: Optional[CategoryResponse] = None
-    attributes: List[ProductAttributeResponse] = Field(default_factory=list)
+    care_instruction: Optional[str] = None
+    categories: List[CategoryResponse] = Field(default_factory=list)
     images: List[ProductImageResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

@@ -10,7 +10,6 @@ Usage:
     python import_normalized_data.py <csv_file> [db_connection_string]
 
 Examples:
-    # Using DATABASE_URL from .env
     python import_normalized_data.py data/normalized_output.csv
     
     # With explicit connection string
@@ -21,6 +20,10 @@ import sys
 import os
 import pandas as pd
 import psycopg2
+from logger_config import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 from psycopg2 import sql
 from dotenv import load_dotenv
 
@@ -81,7 +84,7 @@ def ensure_categories_tables_exist(cur, conn):
 def populate_categories(df, cur, conn):
     """Extract unique category IDs from dataframe and populate categories table"""
     
-    print("POPULATING CATEGORIES TABLE")
+    logger.debug("POPULATING CATEGORIES TABLE")
     
     # Check if categories column exists
     if 'categories' not in df.columns:
@@ -104,7 +107,7 @@ def populate_categories(df, cur, conn):
         print("⚠️  No valid category IDs found")
         return
     
-    print(f"Found {len(all_categories):,} unique category IDs")
+    logger.debug(f"Found {len(all_categories):,} unique category IDs")
     
     # Upsert categories (update if exists, insert if new)
     inserted = 0
@@ -133,8 +136,8 @@ def populate_categories(df, cur, conn):
             continue
     
     conn.commit()
-    print(f"✓ Inserted {inserted:,} new categories")
-    print(f"✓ Updated {updated:,} existing categories")
+    logger.debug(f"✓ Inserted {inserted:,} new categories")
+    logger.debug(f"✓ Updated {updated:,} existing categories")
 
 
 def create_or_update_products_table(df, cur, conn):
@@ -209,7 +212,7 @@ def create_or_update_products_table(df, cur, conn):
             
             conn.commit()
         else:
-            print("✓ All columns already exist")
+            logger.debug("All columns already exist")
     
 
 
@@ -240,7 +243,7 @@ def populate_product_categories(df, cur, conn):
         print("⚠️  No valid product-category mappings found")
         return
     
-    print(f"Found {len(mappings):,} product-category relationships")
+    logger.debug(f"Found {len(mappings):,} product-category relationships")
     
     # Insert mappings
     inserted = 0
@@ -260,27 +263,31 @@ def populate_product_categories(df, cur, conn):
             continue
     
     conn.commit()
-    print(f"Inserted {inserted:,} new mappings")
+    logger.debug(f"Inserted {inserted:,} new mappings")
 
 
 def import_products(csv_file, conn_string):
     """Import products from CSV with dynamic schema generation"""
     
-    print(f"\n📥 Reading CSV file: {csv_file}")
+    logger.debug(f"📥 Reading CSV file: {csv_file}")
     df = pd.read_csv(csv_file, low_memory=False)
     
     # Convert all columns to string to avoid type issues
     for col in df.columns:
         df[col] = df[col].astype(str).replace('nan', None)
     
-    print(f"Loaded {len(df):,} rows with {len(df.columns)} columns")
-    print(f"Columns: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
+    logger.debug(f"Loaded {len(df):,} rows with {len(df.columns)} columns")
+    logger.debug(f"Columns: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
     
     # Connect to database
-    print("Connecting to database...")
-    conn = psycopg2.connect(conn_string)
-    cur = conn.cursor()
-    print("Successfully connected to database.")
+    logger.debug("Connecting to database...")
+    try:
+        conn = psycopg2.connect(conn_string)
+        cur = conn.cursor()
+        logger.debug("Successfully connected to database.")
+    except Exception as e:
+        print(f"\n❌ Error connecting to database: {e}")
+        return 1
     
     try:
         # Step 0: Ensure categories tables exist
@@ -297,10 +304,10 @@ def import_products(csv_file, conn_string):
         
         
         # Step 3: Upsert products (update existing + insert new)
-        print(f"\n{'='*80}")
-        print("UPSERTING PRODUCTS")
-        print(f"{'='*80}")
-        print(f"Processing {len(df):,} products...")
+        logger.debug(f"\n{'='*80}")
+        logger.debug("UPSERTING PRODUCTS")
+        logger.debug(f"{'='*80}")
+        logger.debug(f"Processing {len(df):,} products...")
         
         # Build dynamic upsert query
         columns = list(df.columns)
@@ -328,10 +335,10 @@ def import_products(csv_file, conn_string):
         updated = 0
         
         # Get existing product IDs for tracking
-        print("Checking existing products...")
+        logger.debug("Checking existing products...")
         cur.execute("SELECT product_id FROM products")
         existing_product_ids = {row[0] for row in cur.fetchall()}
-        print(f"Found {len(existing_product_ids):,} existing products in database")
+        logger.debug(f"Found {len(existing_product_ids):,} existing products in database")
         
         for i in range(0, len(df), batch_size):
             batch = df.iloc[i:i+batch_size]
@@ -354,17 +361,17 @@ def import_products(csv_file, conn_string):
             conn.commit()
             
             if (i + batch_size) % 2000 == 0:
-                print(f"  Processed {min(i + batch_size, len(df)):,} / {len(df):,} products...")
+                logger.debug(f"  Processed {min(i + batch_size, len(df)):,} / {len(df):,} products...")
         
-        print(f"✓ Inserted {inserted:,} new products")
-        print(f"✓ Updated {updated:,} existing products")
-        print(f"✓ Total processed: {len(df):,} products")
+        logger.debug(f"✓ Inserted {inserted:,} new products")
+        logger.debug(f"✓ Updated {updated:,} existing products")
+        logger.debug(f"✓ Total processed: {len(df):,} products")
         
         # Step 4: Populate product_categories junction table
         populate_product_categories(df, cur, conn)
         
         # Summary
-        print("✅ IMPORT COMPLETED SUCCESSFULLY!")
+        logger.debug("✅ IMPORT COMPLETED SUCCESSFULLY!")
         
         # Get counts
         cur.execute("SELECT COUNT(*) FROM products")
@@ -376,10 +383,10 @@ def import_products(csv_file, conn_string):
         cur.execute("SELECT COUNT(*) FROM product_categories")
         mapping_count = cur.fetchone()[0]
         
-        print(f"\n📊 Database Summary:")
-        print(f"   Products:              {product_count:,}")
-        print(f"   Categories:            {category_count:,}")
-        print(f"   Product-Category Maps: {mapping_count:,}")
+        logger.debug(f"\n📊 Database Summary:")
+        logger.debug(f"   Products:              {product_count:,}")
+        logger.debug(f"   Categories:            {category_count:,}")
+        logger.debug(f"   Product-Category Maps: {mapping_count:,}")
         
         return 0
         
@@ -407,19 +414,36 @@ if __name__ == '__main__':
     
     csv_file = sys.argv[1]
     
-    # Get connection string from argument or environment variable
+    # Get connection string from argument or construct from environment variables
     if len(sys.argv) >= 3:
         conn_string = sys.argv[2]
         print("Using database connection from command line argument")
     else:
-        conn_string = os.getenv('DATABASE_URL')
-        if not conn_string:
-            print("❌ Error: DATABASE_URL not found in .env file")
+        # Construct DATABASE_URL from individual components
+        db_name = os.getenv('DB_NAME')
+        db_user = os.getenv('DB_USER')
+        db_password = os.getenv('DB_PASSWORD')
+        db_host = os.getenv('DB_HOST')
+        db_port = os.getenv('DB_PORT')
+        
+        # Check if all required components are present
+        missing_vars = []
+        if not db_name: missing_vars.append('DB_NAME')
+        if not db_user: missing_vars.append('DB_USER')
+        if not db_password: missing_vars.append('DB_PASSWORD')
+        if not db_host: missing_vars.append('DB_HOST')
+        if not db_port: missing_vars.append('DB_PORT')
+        
+        if missing_vars:
+            print(f"❌ Error: Missing database configuration: {', '.join(missing_vars)}")
             print("Please either:")
-            print("  1. Add DATABASE_URL to your .env file, or")
+            print("  1. Add DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT to your .env file, or")
             print("  2. Pass the connection string as a command line argument")
             sys.exit(1)
-        print("Using DATABASE_URL from .env file")
+        
+        # Construct the connection string
+        conn_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        logger.debug("Using database configuration from .env file")
     
     exit_code = import_products(csv_file, conn_string)
     sys.exit(exit_code)

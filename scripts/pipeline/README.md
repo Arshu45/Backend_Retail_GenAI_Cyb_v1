@@ -2,42 +2,50 @@
 
 ## Overview
 
-The pipeline processes raw vendor CSV files through multiple stages:
+The pipeline processes vendor provided CSV files through multiple stages:
 1. **Normalize** - Standardize column names and data formats
-2. **Deduplicate** - Group product variants into unique products
-3. **Import to PostgreSQL** - Populate database with categories and products
-4. **Ingest to ChromaDB** - Create vector embeddings for semantic search
-5. **Generate Schema** - Create attribute schema for frontend filters
+2. **Post-Normalize** - Add `sku_base` and enforce strict schema (It didn't include  pass-through columns)
+3. **Extract Unique Products** - Group product variants using sku_base
+4. **Import to PostgreSQL** - Populate database with categories and products (optional)
+5. **Ingest to Vector Database** - Create vector embeddings for semantic search (optional)
+6. **Generate Attribute Schema** - Generate attribute schema for metadata filtering.
 
 ## Quick Start
 
-### Full Pipeline
+### Show Help
 ```bash
-python3 scripts/pipeline/pipeline.py data/raw/magento_products_20K_v2.csv scripts/config/normalization_config.json --deduplicate
+python3 scripts/pipeline/pipeline.py --help
 ```
-
-
-### Skip ChromaDB Ingestion
+### Full Pipeline (Default)
 ```bash
-python3 scripts/pipeline/pipeline.py data/raw/magento_products_20K_v2.csv scripts/config/normalization_config.json --deduplicate --skip-chroma
+python3 scripts/pipeline/pipeline.py data/raw/magento_products.csv scripts/config/normalization_config.json
 ```
+Runs all steps: Normalize → Post-Normalize → Extract unique products → PostgreSQL → Vector DB ingestion → Attribute Schema generation
 
-### Normalize Only (No DB Import)
+### Skip Vector DB Ingestion
 ```bash
-python3 scripts/pipeline/pipeline.py data/raw/magento_products_20K_v2.csv scripts/config/normalization_config.json --deduplicate --skip-db
+python3 scripts/pipeline/pipeline.py data/raw/magento_products.csv scripts/config/normalization_config.json --skip-ingestion
 ```
+Runs: Normalize → Post-Normalize → Extract unique products → PostgreSQL → Attribute Schema generation
+
+### Skip PostgreSQL Import
+```bash
+python3 scripts/pipeline/pipeline.py data/raw/magento_products.csv scripts/config/normalization_config.json --no-import-data
+```
+Runs: Normalize → Post-Normalize → Extract unique products → Vector DB ingestion → Attribute Schema generation
+
 
 ## Pipeline Components
 
 ### 1. normalize_csv.py
-Standardizes raw vendor CSV files using a configuration schema.
+Standardizes vendor provided CSV files using a configuration schema json file. The configuration json file contains the mapping of columns and their data types. 
 
 **Input:**
-- Raw CSV file (e.g., `data/raw/magento_products_20K_v2.csv`)
+- Raw CSV file (e.g., `data/raw/magento_products.csv`)
 - Configuration JSON (e.g., `scripts/config/normalization_config.json`)
 
 **Output:**
-- `data/processed_data/normalized_output.csv` - Standardized data ready for PostgreSQL
+- `data/processed_data/normalized_*.csv` - Full standardized data (all columns). This file is used for PostgreSQL import.
 
 **Features:**
 - Dynamic column mapping based on config
@@ -45,26 +53,39 @@ Standardizes raw vendor CSV files using a configuration schema.
 - Handles missing fields gracefully
 - Preserves original data integrity
 
-### 2. deduplicate_variants.py
-Groups product variants (same SKU base, different sizes/colors) into unique products.
+### 2. post_normalize.py
+Cleans the normalized data and adds internal derived fields (sku_base). It also enforces a strict schema by stripping all pass-through columns.
 
 **Input:**
 - Normalized CSV from step 1
 
 **Output:**
-- `data/processed_data/unique_products.csv` - Aggregated products for analytics
+- `data/processed_data/post_normalized_*.csv` - Strictly schema-compliant data + `sku_base`. Used for grouping product variants.
+
+**Features:**
+- Adds `sku_base` field (derived from `sku`)
+- Enforces strict schema by stripping all pass-through columns
+
+### 3. consolidate_product_variants.py
+Groups product variants (same SKU base, different sizes/colors) into unique products. 
+
+**Input:**
+- Post-normalized CSV from step 2
+
+**Output:**
+- `data/processed_data/unique_*.csv` - Note : Currently we are not using this file.
 
 **Features:**
 - SKU-based grouping (removes size/color suffixes)
-- Aggregates variants into arrays
-- Calculates price ranges
+- Stores colors, prices etc. data comma separated
 - Preserves all variant information
 
-### 3. import_normalized_data.py
-Imports normalized data into PostgreSQL with dynamic schema generation.
+### 4. import_normalized_data.py
+Imports data into PostgreSQL with dynamic schema generation. It also creates the necessary tables and populates them with the data from the CSV file.
+Note : Database (yourdatabasename) must be created in postgresql before running this script.
 
 **Input:**
-- Normalized CSV from step 1 (NOT unique products)
+- Normalized CSV from step 1 (Full data with all columns)
 
 **Output:**
 - PostgreSQL tables: `products`, `categories`, `product_categories`
@@ -75,11 +96,11 @@ Imports normalized data into PostgreSQL with dynamic schema generation.
 - Product-category relationship mapping
 - Indexed for performance (product_id, sku, brand, product_type)
 
-### 4. chromadb_ingestion.py
-Creates vector embeddings for semantic search.
+### 5. chromadb_ingestion.py
+Creates vector embeddings for semantic search. It also creates the necessary documents (tables) and populates them with the data from the CSV file.
 
 **Input:**
-- Reads from CSV path specified in `.env` (`CSV_FILE_PATH`)
+- Post normalized data from step 2 (Strictly schema-compliant data + `sku_base`)
 
 **Output:**
 - ChromaDB collection with embeddings
@@ -90,11 +111,11 @@ Creates vector embeddings for semantic search.
 - Metadata preservation
 - Incremental updates
 
-### 5. csv_schema_generator.py
+### 6. csv_schema_generator.py
 Generates attribute schema for frontend filter system.
 
 **Input:**
-- Reads from CSV path specified in `.env` (`CSV_FILE_PATH`)
+- Post normalized data from step 2 (Strictly schema-compliant data + `sku_base`)
 
 **Output:**
 - `{SCHEMA_DIR}/{COLLECTION_NAME}_schema.json` - Attribute schema file
@@ -109,11 +130,14 @@ Generates attribute schema for frontend filter system.
 
 ### Environment Variables (.env)
 ```bash
-# PostgreSQL
-DATABASE_URL=postgresql://user:password@host:port/database
+# PostgreSQL Database Configuration
+DB_NAME=yourdatabasename
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_HOST=localhost
+DB_PORT=5432
 
-# ChromaDB (only required if not using --skip-chroma)
-CSV_FILE_PATH=data/processed_data/normalized_output.csv
+# Vector Database
 CHROMA_DB_DIR=./chroma_db
 COLLECTION_NAME=products
 EMBEDDING_MODEL=all-MiniLM-L6-v2
@@ -121,46 +145,97 @@ DOCUMENT_COLUMNS=title,description
 SCHEMA_DIR=./schemas
 ```
 
+## Logging
+
+The pipeline uses a dual-output logging system:
+
+### Console Output (INFO level)
+- Shows only important steps and progress
+- Clean, minimal output on terminal for monitoring
+- Example: "✅ Pipeline completed successfully!"
+
+### Log Files (DEBUG level)
+- Detailed execution information
+- Full command outputs and debug info
+- Location: `logs/pipeline_YYYYMMDD_HHMMSS.log`
+- Auto-created with timestamp
+
+**Log file example:**
+```
+2026-02-17 12:20:15 - __main__ - INFO - STARTING DATA PROCESSING PIPELINE
+2026-02-17 12:20:15 - __main__ - DEBUG - Command: python3 normalize_csv.py input.csv
+2026-02-17 12:20:18 - __main__ - INFO - ✅ Normalize raw CSV (3.40s)
+```
+
+**Note:** The pipeline automatically detects child processes and routes all logs to the same file.
+
+
+### Output Files
+
+The pipeline generates output files with names based on the input file:
+- Input: `data/raw/magento_products.csv`
+- Output: `data/processed_data/normalized_magento_products.csv`
+- Output: `data/processed_data/post_normalized_magento_products.csv`
+- Output: `data/processed_data/unique_magento_products.csv`
+- Schema: `data/schema/catalog_ai_schema.json` (uses `COLLECTION_NAME` from .env)
+
+CSV files are uniquely named per vendor to prevent overwrites. The schema filename remains consistent based on `COLLECTION_NAME`.
+
 ### Normalization Config (normalization_config.json)
 Defines the schema and column mappings for your vendor's CSV format.
 
-## Output Files
+Eg: 
+```
+{
+  "schema_version": "1.0",
+  "import_mode": "config_only",
+  "output_schema": [
+    {
+      "name": "product_id",
+      "aliases": [
+        "entity_id",
+        "product_id",
+        "id",
+        "item_id"
+      ],
+      "transform": "safe_int"
+    }
+  ]
+}
 
-All processed files are stored in `data/processed_data/`:
-- `normalized_output.csv` - For PostgreSQL import (all variants, 67,769 rows)
-- `unique_products.csv` - For ChromaDB ingestion (unique products, 23,690 rows)
+```
 
 ## Pipeline Results (Example)
 
-Based on the Magento 20K dataset:
+Based on the Magento dataset:
 
 **Step 1: Normalize CSV**
 - Input: 67,769 rows × 26 columns
-- Output: 67,769 rows × 28 columns
-- Standardized fields: product_id, sku, title, price, stock_status, etc.
+- Output: 67,769 rows × 26 columns (Standardized names)
 
-**Step 2: Deduplicate Variants**
+**Step 2: Post-normalize**
+- Input: 67,769 rows × 26 columns
+- Output: 67,769 rows × 14 columns (Strict schema + `sku_base`)
+
+**Step 3: Consolidate Product Variants**
 - Input: 67,769 variants
 - Output: 23,690 unique products
-- Average variants per product: 2.9
 
-**Step 3: Import to PostgreSQL**
-- Products: 67,769
+**Step 4: Import to PostgreSQL**
+- Products: 67,769 (Imported from Step 1 output)
 - Categories: 792
 - Product-Category mappings: 104,268
 
-**Step 4: Ingest to ChromaDB**
-- Vector embeddings created for semantic search
+**Step 5: Ingest to ChromaDB**
+- Vector embeddings created for semantic search (from Step 2 output)
 
-**Step 5: Generate Schema**
-- Attribute schema generated for frontend filters
-- Auto-detected enums, number ranges, and date fields
+**Step 6: Generate Schema**
+- Attribute schema generated for frontend filters (from Step 2 output)
 
 ## Important Notes
 
-⚠️ **Always import `normalized_output.csv` to PostgreSQL**, not the unique products file!
-- PostgreSQL needs all variants as separate rows
-- Unique products file is for analytics/reporting only
+⚠️ **Always import `normalized_*.csv` to PostgreSQL**, not the post-normalized or unique products files!
+- PostgreSQL needs the full original column set for data preservation.
 
 ✅ **Config validation before processing**
 - Validates all critical field aliases (product_id, sku, title, price) exist in CSV
@@ -171,7 +246,8 @@ Based on the Magento 20K dataset:
 ✅ **Pipeline validates environment variables** before running
 - Checks for required `.env` variables based on flags
 - Fails fast if configuration is missing
-- Skips validation for ChromaDB vars if `--skip-chroma` is used
+- Skips validation for vector DB vars if `--skip-ingestion` is used
+- Skips validation for PostgreSQL vars if `--no-import-data` is used
 
 
 ## Troubleshooting
@@ -181,41 +257,40 @@ Based on the Magento 20K dataset:
 - Use relative paths from project root: `data/raw/file.csv`
 
 ### Database connection errors
-- Verify `DATABASE_URL` in `.env`
-- Check PostgreSQL is running and accessible
-- Test connection: `psql $DATABASE_URL`
+- Verify database configuration in `.env` (DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT)
+- Check PostgreSQL is running: `pg_isready -h localhost -p 5432`
+- Test connection: `psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME`
 
-### ChromaDB errors
-- Ensure `CSV_FILE_PATH` points to normalized output
+### Vector Database errors
+- Ensure CSV file path is passed correctly to the script
 - Verify `CHROMA_DB_DIR` is writable
-- Use `--skip-chroma` flag to skip this step during testing
+- Use `--skip-ingestion` flag to skip this step during testing
 
 ## Examples
 
 ### Process new vendor CSV
 ```bash
 # 1. Add vendor config to scripts/config/
-# 2. Run pipeline
-python3 scripts/pipeline/pipeline.py data/raw/new_vendor.csv scripts/config/new_vendor_config.json --deduplicate
+# 2. Run pipeline (deduplication always enabled)
+python3 scripts/pipeline/pipeline.py data/raw/new_vendor.csv scripts/config/new_vendor_config.json
 ```
 
-### Re-import existing data
+### Update Vector DB only
 ```bash
-# Skip normalization, just re-import to PostgreSQL
-python3 scripts/pipeline/import_normalized_data.py data/processed_data/normalized_output.csv
+# Run ingestion on existing unique products file
+python3 scripts/pipeline/chromadb_ingestion.py data/processed_data/post_normalized_magento_products.csv
 ```
 
-### Update ChromaDB only
+### Generate schema only
 ```bash
-# Make sure CSV_FILE_PATH is set in .env
-python3 scripts/pipeline/chromadb_ingestion.py
+python3 scripts/pipeline/csv_schema_generator.py data/processed_data/post_normalized_magento_products.csv
 ```
 
 ### Development workflow
 ```bash
-# Test normalization only (fast iteration)
-python3 scripts/pipeline/pipeline.py data/raw/sample.csv scripts/config/normalization_config.json --skip-db
+# Skip PostgreSQL import (fast iteration)
+python3 scripts/pipeline/pipeline.py data/raw/sample.csv scripts/config/normalization_config.json --no-import-data
 
-# Test with DB but skip ChromaDB (faster)
-python3 scripts/pipeline/pipeline.py data/raw/sample.csv scripts/config/normalization_config.json --deduplicate --skip-chroma
+# Import to PostgreSQL only (skip vector DB for faster testing)
+python3 scripts/pipeline/pipeline.py data/raw/sample.csv scripts/config/normalization_config.json --skip-ingestion
 ```

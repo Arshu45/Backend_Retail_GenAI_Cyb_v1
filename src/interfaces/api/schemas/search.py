@@ -12,7 +12,7 @@ class SearchRequest(BaseModel):
 
 class ProductResult(BaseModel):
     """Minimal product result for chat display."""
-    id: str
+    sku: str
     title: str
     price: str
     key_features: List[str] = Field(default_factory=list)

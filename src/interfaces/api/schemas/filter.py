@@ -37,7 +37,7 @@ class CategoryAttributeResponse(BaseModel):
 
 class FilterConfig(BaseModel):
     """Filter configuration schema."""
-    attribute_id: int
+    attribute_id: Optional[int] = None
     attribute_name: str
     display_name: str
     data_type: str = Field(..., description="enum | number | boolean | string")

@@ -3,22 +3,30 @@ Complete Data Processing Pipeline
 
 This script runs the entire data processing workflow in series:
 1. Normalize raw CSV
-2. Deduplicate variants for chromadb ingestion
-3. Populate categories in PostgreSQL
-4. Import products to PostgreSQL
+2. Extracts only SKU Base and keep only the necessary columns specified in the config file.
+3. Extracts unique products
+4. Import to PostgreSQL (optional)
+5. Ingest to vector database (optional)
+6. Generate attribute schema
 
 Usage:
-    python pipeline.py <raw_csv> <config_json> [--deduplicate] [--skip-db]
+    python pipeline.py <raw_csv> <config_json> [options]
+    python pipeline.py --help
+
+Options:
+    --no-import-data     Skip PostgreSQL import only
+    --skip-ingestion     Skip vector database ingestion only
+    --help, -h           Show this help message
 
 Examples:
-    # Full pipeline with deduplication and DB import
-    python pipeline.py data/raw_vendor.csv normalization_config.json --deduplicate
+    # Full pipeline (normalize + consolidate + import to PostgreSQL + Vector DB ingestion + CSV Schema Generation)
+    python pipeline.py data/raw_vendor.csv config.json
 
-    # Normalize + deduplicate only (skip DB)
-    python pipeline.py data/raw_vendor.csv normalization_config.json --deduplicate --skip-db
+    # Skip PostgreSQL import only
+    python pipeline.py data/raw_vendor.csv config.json --no-import-data
 
-    # Normalize + DB import (no deduplication)
-    python pipeline.py data/raw_vendor.csv normalization_config.json
+    # Import to PostgreSQL only (skips vector db ingestion)
+    python pipeline.py data/raw_vendor.csv config.json --skip-ingestion
 """
 
 import sys
@@ -27,6 +35,10 @@ import time
 import subprocess
 from pathlib import Path
 from dotenv import load_dotenv
+from logger_config import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -37,24 +49,30 @@ SCRIPT_DIR = Path(__file__).parent.absolute()
 # Import validation module
 from validate_config import validate_normalization_config, validate_config_structure
 
+def validate_env_variables(no_import_data=False, skip_ingestion=False):
 
-def validate_env_variables(skip_db=False, skip_chroma=False):
     """Validate that all required environment variables are set"""
-    print("\n" + "="*80)
-    print("VALIDATING ENVIRONMENT VARIABLES")
-    print("="*80)
+    logger.debug("="*80)
+    logger.debug("VALIDATING ENVIRONMENT VARIABLES")
+    logger.debug("="*80)
     
     required_vars = []
     optional_vars = []
     
-    # Database variables (required if not skipping DB)
-    if not skip_db:
-        required_vars.append(('DATABASE_URL', 'PostgreSQL connection string'))
-    
-    # ChromaDB variables (required if not skipping ChromaDB)
-    if not skip_db and not skip_chroma:
+    # Database variables (required if importing data)
+    if not no_import_data:
         required_vars.extend([
-            ('CSV_FILE_PATH', 'Path to CSV for ChromaDB ingestion'),
+            ('DB_NAME', 'PostgreSQL database name'),
+            ('DB_USER', 'PostgreSQL user'),
+            ('DB_PASSWORD', 'PostgreSQL password'),
+            ('DB_HOST', 'PostgreSQL host'),
+            ('DB_PORT', 'PostgreSQL port')
+        ])
+    
+    # Vector DB variables (required if not skipping vector DB and not skipping PostgreSQL)
+    # Note: Vector DB can run independently, but typically needs data in PostgreSQL first
+    if not skip_ingestion:
+        required_vars.extend([
             ('CHROMA_DB_DIR', 'ChromaDB storage directory'),
             ('COLLECTION_NAME', 'ChromaDB collection name'),
             ('EMBEDDING_MODEL', 'Sentence transformer model'),
@@ -75,7 +93,6 @@ def validate_env_variables(skip_db=False, skip_chroma=False):
     
     # Print status
     if present_vars:
-        print("\n✅ Found required variables:")
         for var_name, description in present_vars:
             # Mask sensitive values
             value = os.getenv(var_name)
@@ -83,31 +100,93 @@ def validate_env_variables(skip_db=False, skip_chroma=False):
                 display_value = value[:20] + '...' if len(value) > 20 else value
             else:
                 display_value = value[:50] + '...' if len(value) > 50 else value
-            print(f"  • {var_name:20} = {display_value}")
+            logger.debug(f"  • {var_name:20} = {display_value}")
     
     if missing_vars:
         print("\n❌ Missing required variables:")
         for var_name, description in missing_vars:
-            print(f"  • {var_name:20} - {description}")
+            logger.debug(f"  • {var_name:20} - {description}")
         print("\n⚠️  Please add these variables to your .env file")
         return False
     
-    print("\n✅ All required environment variables are set!")
+    logger.debug("✅ All required environment variables are set!")
     return True
+
+
+def validate_inputs(raw_csv, config_json, no_import_data=False, skip_ingestion=False):
+    """
+    Validate all inputs before running the pipeline.
+    
+    Args:
+        raw_csv: Path to raw CSV file
+        config_json: Path to configuration JSON file
+        no_import_data: Whether PostgreSQL import is skipped
+        skip_ingestion: Whether vector DB ingestion is skipped
+    
+    Returns:
+        bool: True if all validations pass, False otherwise
+    """
+    # 1. Validate file existence
+    if not os.path.exists(raw_csv):
+        print(f"❌ Error: Input file not found: {raw_csv}")
+        return False
+    
+    if not os.path.exists(config_json):
+        print(f"❌ Error: Config file not found: {config_json}")
+        return False
+    
+    # 2. Validate environment variables
+    if not validate_env_variables(no_import_data=no_import_data, skip_ingestion=skip_ingestion):
+        print("\n❌ Pipeline aborted due to missing environment variables")
+        return False
+    
+    # 3. Validate configuration structure
+    logger.debug("="*80)
+    logger.debug("VALIDATING CONFIGURATION")
+    logger.debug("="*80)
+    
+    is_valid_structure, structure_errors = validate_config_structure(config_json)
+    if not is_valid_structure:
+        print("\n❌ Config structure validation failed:")
+        for error in structure_errors:
+            logger.debug(f"  • {error}")
+        print("\n💡 Please fix the configuration file and try again.")
+        return False
+    
+    logger.debug("✅ Config structure is valid")
+    
+    # 4. Validate aliases against CSV columns
+    logger.debug("")
+    logger.debug("Validating aliases against CSV columns...")
+    is_valid, errors = validate_normalization_config(raw_csv, config_json)
+    
+    if not is_valid:
+        print("\n❌ Configuration validation failed:")
+        for error in errors:
+            logger.debug(f"  • {error}")
+        print("\n💡 Please fix the configuration file and try again.")
+        return False
+    
+    logger.debug("")
+    logger.debug("✅ All aliases are valid")
+    
+    return True
+
 
 
 def run_command(cmd, description):
     """Run a command and handle errors, returning (success, duration)"""
-    print(f"\n{'='*80}")
-    print(f"{description}")
-    print(f"{'='*80}")
-    print(f"Command: {' '.join(cmd)}\n")
+    logger.debug(f"\n{'='*80}")
+    logger.info(description)
+    logger.debug(f"{'='*80}")
+    logger.debug(f"Command: {' '.join(cmd)}\n")
     
     start_time = time.time()
     try:
         subprocess.run(cmd, check=True, capture_output=False, text=True)
         duration = time.time() - start_time
-        print(f"\n✅ {description} completed successfully! ({duration:.2f}s)")
+        print(f"{description} completed successfully! ({duration:.2f}s)")
+        print("\n")
         return True, duration
     except subprocess.CalledProcessError as e:
         duration = time.time() - start_time
@@ -116,97 +195,60 @@ def run_command(cmd, description):
 
 
 def main():
+    # Check for help flag first
+    if '--help' in sys.argv or '-h' in sys.argv:
+        print(__doc__)  # Print the module docstring
+        sys.exit(0)
+    
     if len(sys.argv) < 3:
-        print("Usage: python pipeline.py <raw_csv> <config_json> [--deduplicate] [--skip-db] [--skip-chroma]")
-        print("\nExamples:")
-        print("  # Full pipeline with deduplication")
-        print("  python pipeline.py data/raw_vendor.csv normalization_config.json --deduplicate")
+        print("❌ Error: Missing required arguments")
         print()
-        print("  # Normalize + DB import (no deduplication)")
-        print("  python pipeline.py data/raw_vendor.csv normalization_config.json")
-        print()
-        print("  # Normalize + deduplicate only (skip DB and ChromaDB)")
-        print("  python pipeline.py data/raw_vendor.csv normalization_config.json --deduplicate --skip-db")
-        print()
-        print("  # Skip ChromaDB ingestion only")
-        print("  python pipeline.py data/raw_vendor.csv normalization_config.json --deduplicate --skip-chroma")
+        print(__doc__)  # Print the module docstring
         sys.exit(1)
     
     raw_csv = sys.argv[1]
     config_json = sys.argv[2]
-    should_deduplicate = '--deduplicate' in sys.argv
-    skip_db = '--skip-db' in sys.argv
-    skip_chroma = '--skip-chroma' in sys.argv
     
-    # Validate inputs
-    if not os.path.exists(raw_csv):
-        print(f"❌ Error: Input file not found: {raw_csv}")
-        sys.exit(1)
+    # Parse flags (deduplication is always enabled now)
+    should_consolidate = True  # Always consolidate
+    no_import_data = '--no-import-data' in sys.argv
+    skip_ingestion = '--skip-ingestion' in sys.argv
     
-    if not os.path.exists(config_json):
-        print(f"❌ Error: Config file not found: {config_json}")
+    # Validate all inputs (files, env vars, config)
+    if not validate_inputs(raw_csv, config_json, no_import_data=no_import_data, skip_ingestion=skip_ingestion):
         sys.exit(1)
     
     # Define output paths - store in data/processed_data
+    # Use input filename to create unique output files
     output_dir = Path("data/processed_data")
     output_dir.mkdir(parents=True, exist_ok=True)  # Create directory if it doesn't exist
-    normalized_csv = output_dir / "normalized_output.csv"
-    products_csv = output_dir / "unique_products.csv"
     
-    # Validate environment variables before proceeding
-    if not validate_env_variables(skip_db=skip_db, skip_chroma=skip_chroma):
-        print("\n❌ Pipeline aborted due to missing environment variables")
-        sys.exit(1)
-    
-    # Validate configuration against CSV
-    print("\n" + "="*80)
-    print("VALIDATING CONFIGURATION")
-    print("="*80)
-    
-    # First validate config structure
-    is_valid_structure, structure_errors = validate_config_structure(config_json)
-    if not is_valid_structure:
-        print("\n❌ Config structure validation failed:")
-        for error in structure_errors:
-            print(f"  • {error}")
-        print("\n💡 Please fix the configuration file and try again.")
-        sys.exit(1)
-    
-    print("✅ Config structure is valid")
-    
-    # Then validate aliases against CSV
-    print("\n")
-    print("Validating aliases against CSV columns...")
-    is_valid, errors = validate_normalization_config(raw_csv, config_json)
-    
-    if not is_valid:
-        print("\n❌ Configuration validation failed:")
-        for error in errors:
-            print(f"  • {error}")
-        print("\n💡 Please fix the configuration file and try again.")
-        sys.exit(1)
-    
-    print("\n")
-    print("✅ All aliases are valid")
-    
-    
-    # IMPORTANT: Always import normalized_output.csv to PostgreSQL
-    # products.csv is for chromadb ingestion
+    # Extract base filename without extension
+    input_basename = Path(raw_csv).stem  # e.g., "magento_products"
+    normalized_csv = output_dir / f"normalized_{input_basename}.csv"
+    post_normalized_csv = output_dir / f"post_normalized_{input_basename}.csv"
+    tagged_csv = output_dir / f"tagged_{input_basename}.csv"
+    products_csv = output_dir / f"unique_{input_basename}.csv"
+
+    # Occasion config — always lives next to script dir
+    occasion_config_json = SCRIPT_DIR / ".." / "config" / "occasion_config.json"
+
+    # PostgreSQL import uses the full normalized CSV
     import_csv = normalized_csv
     
-    print("="*80)
-    print("STARTING DATA PROCESSING PIPELINE")
-    print("="*80)
-    print(f"Input:        {raw_csv}")
-    print(f"Config:       {config_json}")
-    print(f"Normalized:   {normalized_csv} (for PostgreSQL)")
-    if should_deduplicate:
-        print(f"Products:     {products_csv} (for analytics)")
-    print(f"Deduplicate:  {'Yes' if should_deduplicate else 'No'}")
-    print(f"Import to DB: {'No (skipped)' if skip_db else 'Yes'}")
-    print("="*80)
+    logger.debug("="*80)
+    logger.debug("STARTING DATA PROCESSING PIPELINE")
+    logger.debug("="*80)
+    logger.debug(f"Input:        {raw_csv}")
+    logger.debug(f"Config:       {config_json}")
+    logger.debug(f"Normalized:   {normalized_csv} (for PostgreSQL)")
+    if should_consolidate:
+        logger.debug(f"Products:     {products_csv} (for analytics)")
+    logger.debug("Consolidate:  Always enabled")
+    logger.debug(f"Import to DB: {'No (skipped)' if no_import_data else 'Yes'}")
+    logger.debug("="*80)
     
-    print("\n📋 Executing Pipeline Steps...")
+    logger.info("\n📋 Executing Pipeline Steps...")
     
     # Store durations for summary
     durations = {}
@@ -225,69 +267,107 @@ def main():
         print("\n❌ Pipeline failed at normalization step")
         sys.exit(1)
     durations['normalize'] = duration
-    
-    # Step 2: Deduplicate (if requested)
-    if should_deduplicate:
-        deduplicate_cmd = [
+
+    # Step 2: Post-normalize (add sku_base, strip pass-through columns)
+    post_normalize_cmd = [
+        'python3',
+        str(SCRIPT_DIR / 'post_normalize.py'),
+        str(normalized_csv),
+        str(post_normalized_csv),  # Write to separate file
+        config_json
+    ]
+
+    success, duration = run_command(post_normalize_cmd, "Step 2: Post-normalize (add sku_base, enforce schema columns)")
+    if not success:
+        print("\n❌ Pipeline failed at post-normalization step")
+        sys.exit(1)
+    durations['post_normalize'] = duration
+
+    # Step 3: Tag products with occasion keywords
+    tag_cmd = [
+        'python3',
+        str(SCRIPT_DIR / 'tag_products.py'),
+        str(post_normalized_csv),
+        str(tagged_csv),
+        str(occasion_config_json)
+    ]
+
+    success, duration = run_command(tag_cmd, "Step 3: Tag products with occasion keywords")
+    if not success:
+        print("\n❌ Pipeline failed at tag products step")
+        sys.exit(1)
+    durations['tag_products'] = duration
+
+    # Step 4: Consolidate product variants
+    if should_consolidate:
+        consolidate_cmd = [
             'python3',
-            str(SCRIPT_DIR / 'deduplicate_variants.py'),
-            str(normalized_csv),
+            str(SCRIPT_DIR / 'consolidate_product_variants.py'),
+            str(tagged_csv),
             str(products_csv),
             config_json
         ]
-        
-        success, duration = run_command(deduplicate_cmd, "Step 2: Extracting unique products")
+
+        success, duration = run_command(consolidate_cmd, "Step 3: Consolidate product variants")
         if not success:
             print("\n❌ Pipeline failed at deduplication step")
             sys.exit(1)
-        durations['deduplicate'] = duration
+        durations['consolidate'] = duration
+
     
-    # Step 3: Database Import (if not skipped)
+    # Step 5: Database Import (if not skipped)
     # Note: import_normalized_data.py now handles category population automatically
-    if not skip_db:
+    if not no_import_data:
         import_cmd = [
             'python3',
             str(SCRIPT_DIR / 'import_normalized_data.py'),
             str(import_csv)
         ]
-        
-        step_num = 3 if should_deduplicate else 2
+
+        step_num = 5 if should_consolidate else 4
         success, duration = run_command(import_cmd, f"Step {step_num}: Import to PostgreSQL (Categories + Products)")
         if not success:
             print("\n❌ Pipeline failed at database import step")
             sys.exit(1)
         durations['import_db'] = duration
-        
-        # Step 4: ChromaDB Ingestion (if not skipped)
-        if not skip_chroma:
-            chroma_cmd = ['python3', str(SCRIPT_DIR / 'chromadb_ingestion.py')]
-            chroma_step_num = 4 if should_deduplicate else 3
-            success, duration = run_command(chroma_cmd, f"Step {chroma_step_num}: Ingest to ChromaDB (Vector Search)")
-            if not success:
-                print("\n❌ Pipeline failed at ChromaDB ingestion step")
-                sys.exit(1)
-            durations['chroma'] = duration
+    
+    # Step 6: Vector DB Ingestion — uses tagged CSV so tags land in ChromaDB metadata
+    if not skip_ingestion:
+        chroma_cmd = [
+            'python3',
+            str(SCRIPT_DIR / 'chromadb_ingestion.py'),
+            str(tagged_csv)  # Pass tagged CSV so occasion tags are ingested
+        ]
+
+        # Calculate step number
+        if no_import_data:
+            chroma_step_num = 4
         else:
-            print("\n⏭️  Skipping ChromaDB ingestion (--skip-chroma flag)")
+            chroma_step_num = 6
+
+        success, duration = run_command(chroma_cmd, f"Step {chroma_step_num}: Ingest to Vector Database (with tags)")
+        if not success:
+            print("\n❌ Pipeline failed at vector database ingestion step")
+            sys.exit(1)
+        durations['chroma'] = duration
+    else:
+        print("\n Skipping vector database ingestion (--skip-vector-db flag)")
     
     # Schema Generation: Runs independently (only needs CSV, not DB)
     # Calculate step number based on what was skipped
-    if should_deduplicate:
-        if skip_db:
-            schema_step_num = 3
-        elif skip_chroma:
-            schema_step_num = 4
-        else:
-            schema_step_num = 5
-    else:
-        if skip_db:
-            schema_step_num = 2
-        elif skip_chroma:
-            schema_step_num = 3
-        else:
-            schema_step_num = 4
+    step_count = 3  # Base: normalize + consolidate + schema
+    if not no_import_data:
+        step_count += 1  # Add PostgreSQL import
+    if not skip_ingestion:
+        step_count += 1  # Add vector DB
     
-    schema_cmd = ['python3', str(SCRIPT_DIR / 'csv_schema_generator.py')]
+    schema_step_num = step_count
+    
+    schema_cmd = [
+        'python3',
+        str(SCRIPT_DIR / 'csv_schema_generator.py'),
+        str(tagged_csv)  # Pass tagged CSV so tags column is included in schema
+    ]
     success, duration = run_command(schema_cmd, f"Step {schema_step_num}: Generate Attribute Schema")
     if not success:
         print("\n❌ Pipeline failed at schema generation step")
@@ -295,35 +375,36 @@ def main():
     durations['schema'] = duration
     
     # Summary
-    print("\n" + "-"*80)
-    print("✅ PIPELINE COMPLETED SUCCESSFULLY!")
-    print("-"*80)
-    print("\n📁 Output Files:")
-    print(f"  ✓ Normalized CSV: {normalized_csv}")
-    if should_deduplicate:
-        print(f"  ✓ Products CSV:   {products_csv}")
-    print(f"  ✓ Schema JSON:    {SCRIPT_DIR / '..'/ '..'/ 'data' / 'schema' / 'catalog_ai_schema.json'}")
+    logger.debug("-"*80)
+    logger.info("PIPELINE COMPLETED SUCCESSFULLY!")
+    logger.debug("-"*80)
+    logger.debug("-"*80)
+    logger.debug("\n📁 Output Files:")
+    logger.debug(f"  ✓ Normalized CSV: {normalized_csv}")
+    logger.debug(f"  ✓ Tagged CSV:     {tagged_csv}")
+    logger.debug(f"  ✓ Products CSV:   {products_csv}")
+    logger.debug(f"  ✓ Schema JSON:    {SCRIPT_DIR / '..'/ '..'/ 'data' / 'schema' / 'catalog_ai_schema.json'}")
     
-    print("\n📋 Pipeline Steps Completed:")
-    print(f"  1. ✅ Normalize raw CSV ({durations.get('normalize', 0):.2f}s)")
+    logger.debug("\n📁 Output Files:")
+    logger.debug("\n📋 Pipeline Steps Completed:")
+    logger.debug(f"  1. ✅ Normalize raw CSV ({durations.get('normalize', 0):.2f}s)")
+    logger.debug(f"  2. ✅ Post-normalize ({durations.get('post_normalize', 0):.2f}s)")
+    logger.debug(f"  3. ✅ Tag products with occasion keywords ({durations.get('tag_products', 0):.2f}s)")
+    logger.debug(f"  4. ✅ Consolidate product variants ({durations.get('consolidate', 0):.2f}s)")
     
-    current_step = 2
-    if should_deduplicate:
-        print(f"  {current_step}. ✅ Extracting unique products ({durations.get('deduplicate', 0):.2f}s)")
+    current_step = 3
+    if not no_import_data:
+        logger.debug(f"  {current_step}. ✅ Import to PostgreSQL ({durations.get('import_db', 0):.2f}s)")
         current_step += 1
-    
-    if not skip_db:
-        print(f"  {current_step}. ✅ Import to PostgreSQL ({durations.get('import_db', 0):.2f}s)")
-        current_step += 1
-        if not skip_chroma:
-            print(f"  {current_step}. ✅ Ingest to ChromaDB ({durations.get('chroma', 0):.2f}s)")
+        if not skip_ingestion:
+            logger.debug(f"  {current_step}. ✅ Ingest to Vector Database ({durations.get('chroma', 0):.2f}s)")
             current_step += 1
     
-    print(f"  {current_step}. ✅ Generate attribute schema ({durations.get('schema', 0):.2f}s)")
+    logger.debug(f"  {current_step}. ✅ Generate attribute schema ({durations.get('schema', 0):.2f}s)")
     
     total_time = sum(durations.values())
-    print(f"\n⏱️  Total execution time: {total_time:.2f}s")
-    print("="*80)
+    logger.info(f"\n⏱️  Total execution time: {total_time:.2f}s")
+    logger.debug("="*80)
 
 
 if __name__ == '__main__':

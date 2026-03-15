@@ -2,6 +2,7 @@
 
 import os
 import json
+import time
 from langchain_core.tools import tool
 from src.config.logger import get_logger
 from src.config.csv_schema_loader import get_attribute_schema
@@ -33,9 +34,43 @@ def create_product_search_tool(product_service):
             JSON string with product search results including titles, prices, and metadata
         """
         try:
-            products = product_service.search_products(query, n_results=5)
-            
+            tool_start_time = time.perf_counter()
+            result = product_service.search_products(query, n_results=15)
+            time_after_search = time.perf_counter()
+
+            # ── NEED MORE INFO GATE ────────────────────────────────
+            # product_search_service returns a dict with need_more_info=True
+            # when fewer than MIN_ATTRIBUTES_TO_SEARCH were extracted.
+            # The agent sees this and asks the user for more details
+            # instead of returning irrelevant products.
+            if isinstance(result, dict) and result.get("need_more_info"):
+                attr_count = result.get("attr_count", 0)
+                extracted = result.get("extracted_so_far", {})
+                logger.info(
+                    f"[TOOL] need_more_info=True | "
+                    f"attr_count={attr_count} | extracted={extracted}"
+                )
+                return json.dumps({
+                    "found": False,
+                    "need_more_info": True,
+                    "attr_count": attr_count,
+                    "extracted_so_far": extracted,
+                    "message": (
+                        "Search was NOT performed. "
+                        "Do NOT say 'no products found' or 'could not find'. "
+                        "Instead ask the user for more details naturally. "
+                        "First ask what type of product they are looking for "
+                        "(e.g., dresses, accessories, bags), then about color, size, or budget."
+                    )
+                })
+            # ── END NEED MORE INFO GATE ────────────────────────────
+
+            # From here, result is a list of products (normal flow)
+            products = result
+
             if not products:
+                total_tool = time.perf_counter() - tool_start_time
+                logger.info(f"[TOOL] Total Tool Time: {total_tool:.4f}s")
                 return json.dumps({
                     "found": False,
                     "message": f"No products found matching '{query}'",
@@ -57,20 +92,31 @@ def create_product_search_tool(product_service):
                     metadata = product.get("metadata", {})
                     
                     formatted_product = {}
-                    # ðŸ”¹ Document fields
+                    # 🔹 Document fields
                     for field in DOCUMENT_COLUMNS:
                         formatted_product[field] = doc.get(field, "")
 
-                    # ðŸ”¹ Metadata fields
+                    # 🔹 Metadata fields
                     for attr_name, attr_schema in ATTRIBUTE_SCHEMA.items():
                         formatted_product[attr_name] = metadata.get(attr_name, "")
+
+                    # 🔹 Key features (per product)
+                    formatted_product["key_features"] = product.get("key_features", [])
 
                     formatted_products.append(formatted_product)
 
                 except Exception as e:
                     logger.warning(f"Error formatting product: {e}")
                     continue
-            
+            time_after_format = time.perf_counter()
+
+            logger.info(f"""
+    [TOOL Timing]
+    Search Call Time : {(time_after_search - tool_start_time):.4f}s
+    Formatting Time  : {(time_after_format - time_after_search):.4f}s
+    -----------------------------------------------------------
+    Total Tool Time  : {(time_after_format - tool_start_time):.4f}s
+    """)
             return json.dumps({
                 "found": True,
                 "count": len(formatted_products),

@@ -1,102 +1,88 @@
 """
 SQLAlchemy database models
-Dynamic category-driven attribute system
+Migrated to flat schema (2026-02-13)
 """
 
 from sqlalchemy import (
     Column,
     Integer,
     String,
-    Float,
     ForeignKey,
-    Boolean,
     DateTime,
     Text,
-    Enum,
-    Numeric,
     UniqueConstraint,
-    CheckConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-import enum
 
 from src.infrastructure.database.connection import Base
 
 
 # =========================
-# ENUMS
-# =========================
-
-class AttributeDataType(enum.Enum):
-    STRING = "string"
-    NUMBER = "number"
-    BOOLEAN = "boolean"
-    ENUM = "enum"
-
-
-# =========================
-# CATEGORIES (HIERARCHY)
+# CATEGORIES
 # =========================
 
 class Category(Base):
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
-    parent_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    name = Column(String(255), nullable=True)
+    parent_id = Column(Integer, nullable=True)
     description = Column(Text, nullable=True)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
 
-    __table_args__ = (
-        UniqueConstraint("name", "parent_id", name="uq_category_name_parent"),
-    )
-
-    parent = relationship("Category", remote_side=[id], backref="children")
-    products = relationship("Product", back_populates="category")
-    category_attributes = relationship(
-        "CategoryAttribute",
+    # Relationships
+    product_categories = relationship(
+        "ProductCategory",
         back_populates="category",
         cascade="all, delete-orphan",
     )
 
 
-# =========================  
-# PRODUCTS
+# =========================
+# PRODUCTS (Flat Schema)
 # =========================
 
 class Product(Base):
     __tablename__ = "products"
 
+    # Primary identifiers
     product_id = Column(String(50), primary_key=True, index=True)
+    sku = Column(String(255), index=True)
     title = Column(String(500), nullable=False, index=True)
-    brand = Column(String(255), index=True)
-    product_type = Column(String(255))
-
-    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
-
-    price = Column(Float, nullable=False)
-    mrp = Column(Float)
-    discount_percent = Column(Float)
-    currency = Column(String(10), default="INR")
-    stock_status = Column(String(50), index=True)
-
+    description = Column(Text, nullable=True)
+    
+    # Categories stored as comma-separated string (legacy field)
+    categories = Column(String(500), nullable=True)
+    
+    # Pricing
+    price = Column(String(50), nullable=True)
+    
+    # Status and timestamps
+    stock_status = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Product attributes (all VARCHAR)
+    color = Column(String(255), nullable=True)
+    size = Column(String(255), nullable=True)
+    care_instruction = Column(Text, nullable=True)
+    product_type = Column(String(255), nullable=True, index=True)
+    attribute_set_id = Column(String(50), nullable=True)
+    barcode = Column(String(255), nullable=True)
+    released_date = Column(String(255), nullable=True)
+    item_price_status = Column(String(255), nullable=True)
+    country_of_manufacture = Column(String(255), nullable=True)
+    dinkus = Column(String(255), nullable=True)
+    dinkus_hex_colour = Column(String(255), nullable=True)
+    style_code = Column(String(255), nullable=True)
+    swatch_hex_colour = Column(String(255), nullable=True)
+    url_key = Column(String(500), nullable=True)
+    url_path = Column(String(500), nullable=True)
 
-    category = relationship("Category", back_populates="products")
-    attribute_values = relationship(
-        "AttributeValue",
+    # Relationships
+    product_categories = relationship(
+        "ProductCategory",
         back_populates="product",
         cascade="all, delete-orphan",
     )
@@ -108,149 +94,35 @@ class Product(Base):
 
 
 # =========================
-# ATTRIBUTE MASTER (GLOBAL)
+# PRODUCT-CATEGORY JUNCTION
 # =========================
 
-class Attribute(Base):
-    """
-    Global attribute definition
-    Example: color, size, gsm, warranty_years
-    """
-    __tablename__ = "attribute_master"
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
 
-    attribute_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True, index=True)
-    # data_type = Column(Enum(AttributeDataType), nullable=False)
-    data_type = Column(
-                    Enum(
-                        AttributeDataType,
-                        values_callable=lambda enum_cls: [e.value for e in enum_cls],
-                        native_enum=True,
-                        name="attributedatatype",
-                    ),
-                    nullable=False,
-                )
-
-    description = Column(Text, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    category_mappings = relationship(
-        "CategoryAttribute",
-        back_populates="attribute",
-        cascade="all, delete-orphan",
-    )
-    attribute_values = relationship(
-        "AttributeValue",
-        back_populates="attribute",
-        cascade="all, delete-orphan",
-    )
-    options = relationship(
-        "AttributeOption",
-        back_populates="attribute",
-        cascade="all, delete-orphan",
-    )
-
-
-# =========================
-# CATEGORY ↔ ATTRIBUTE MAP
-# =========================
-
-class CategoryAttribute(Base):
-    """
-    Defines which attributes apply to which category
-    """
-    __tablename__ = "category_attributes"
-
-    id = Column(Integer, primary_key=True)
-    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False)
-    attribute_id = Column(Integer, ForeignKey("attribute_master.attribute_id"), nullable=False)
-
-    is_required = Column(Boolean, default=False)
-    is_filterable = Column(Boolean, default=True)
-    display_order = Column(Integer, default=0)
-
-    __table_args__ = (
-        UniqueConstraint("category_id", "attribute_id", name="uq_category_attribute"),
-    )
-
-    category = relationship("Category", back_populates="category_attributes")
-    attribute = relationship("Attribute", back_populates="category_mappings")
-
-
-# =========================
-# ATTRIBUTE VALUES (EAV)
-# =========================
-
-class AttributeValue(Base):
-    """
-    Stores product-specific attribute values
-    """
-    __tablename__ = "attribute_values"
-
-    value_id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
     product_id = Column(
         String(50),
         ForeignKey("products.product_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    attribute_id = Column(
+    category_id = Column(
         Integer,
-        ForeignKey("attribute_master.attribute_id", ondelete="CASCADE"),
+        ForeignKey("categories.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-
-    value_string = Column(String(255))
-    value_number = Column(Numeric(10, 2))
-    value_boolean = Column(Boolean)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        UniqueConstraint("product_id", "attribute_id", name="uq_product_attribute"),
-        CheckConstraint(
-            """
-            (value_string IS NOT NULL)::int +
-            (value_number IS NOT NULL)::int +
-            (value_boolean IS NOT NULL)::int = 1
-            """,
-            name="ck_single_value_only",
-        ),
-    )
-
-    product = relationship("Product", back_populates="attribute_values")
-    attribute = relationship("Attribute", back_populates="attribute_values")
-
-
-# =========================
-# ATTRIBUTE OPTIONS (ENUM)
-# =========================
-
-class AttributeOption(Base):
-    """
-    ENUM values for attributes
-    """
-    __tablename__ = "attribute_options"
-
-    option_id = Column(Integer, primary_key=True, index=True)
-    attribute_id = Column(
-        Integer,
-        ForeignKey("attribute_master.attribute_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    option_value = Column(String(100), nullable=False)
     display_order = Column(Integer, default=0)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint("attribute_id", "option_value", name="uq_attribute_option"),
+        UniqueConstraint("product_id", "category_id", name="uq_product_category"),
     )
 
-    attribute = relationship("Attribute", back_populates="options")
+    # Relationships
+    product = relationship("Product", back_populates="product_categories")
+    category = relationship("Category", back_populates="product_categories")
 
 
 # =========================
@@ -268,7 +140,7 @@ class ProductImage(Base):
         index=True,
     )
     image_url = Column(String(1000), nullable=False)
-    is_primary = Column(Boolean, default=False)
+    is_primary = Column(Integer, default=0)
     display_order = Column(Integer, default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

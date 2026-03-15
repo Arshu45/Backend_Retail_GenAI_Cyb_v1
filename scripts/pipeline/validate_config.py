@@ -48,6 +48,7 @@ def validate_normalization_config(csv_path: str, config_path: str) -> Tuple[bool
         errors.append(f"Failed to read CSV file: {e}")
         return False, errors
     
+    
     # Validate each field in the schema
     schema = config.get('output_schema', [])
     
@@ -59,7 +60,10 @@ def validate_normalization_config(csv_path: str, config_path: str) -> Tuple[bool
         aliases = field.get('aliases', [])
         
         if not aliases:
-            # Skip fields with no aliases (derived fields, etc.)
+            # Aliases are mandatory
+            errors.append(
+                f"Field '{field_name}' is missing 'aliases' field. All fields must have aliases defined."
+            )
             continue
         
         # Check if at least one alias exists in CSV columns (case-insensitive)
@@ -89,6 +93,7 @@ def validate_normalization_config(csv_path: str, config_path: str) -> Tuple[bool
     # Return validation result
     is_valid = len(errors) == 0
     return is_valid, errors
+
 
 
 def validate_config_structure(config_path: str) -> Tuple[bool, List[str]]:

@@ -3,6 +3,10 @@ import sys
 import csv
 import json
 import time
+from logger_config import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 from collections import defaultdict
 from typing import Dict, Optional
 
@@ -16,11 +20,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CSV_FILE_PATH = os.getenv("CSV_FILE_PATH")
-SCHEMA_DIR = os.getenv("SCHEMA_DIR")
-CATALOG_NAME = os.getenv("COLLECTION_NAME")
+# CSV file path is required as command-line argument
+if len(sys.argv) < 2:
+    print("❌ Error: CSV file path not provided")
+    print("Usage: python csv_schema_generator.py <csv_file_path>")
+    sys.exit(1)
 
-SCHEMA_FILE = f"{CATALOG_NAME}_schema.json"
+CSV_FILE_PATH = sys.argv[1]
+SCHEMA_DIR = os.getenv("SCHEMA_DIR")
+COLLECTION_NAME = os.getenv("COLLECTION_NAME")
+
+# Use COLLECTION_NAME for schema filename (consistent across vendors)
+SCHEMA_FILE = f"{COLLECTION_NAME}_schema.json"
 output_schema_path = os.path.join(SCHEMA_DIR, SCHEMA_FILE)
 
 DOCUMENT_COLUMNS = {
@@ -31,9 +42,27 @@ DOCUMENT_COLUMNS = {
 
 ENUM_MAX_UNIQUE_VALUES = int(os.getenv("ENUM_MAX_UNIQUE_VALUES", 50))
 
+# Columns that should always be treated as enum regardless of cardinality.
+# Use this for attributes like "color" that may have many unique values in
+# large catalogs but must remain enum so the LLM can validate against real values.
+# Configure in .env as a comma-separated list: FORCE_ENUM_COLUMNS=color,material
+FORCE_ENUM_COLUMNS = {
+    col.strip().lower()
+    for col in os.getenv("FORCE_ENUM_COLUMNS", "").split(",")
+    if col.strip()
+}
+
+
 def generate_schema_from_csv(csv_file_path: str) -> Dict:
     """
     Generate attribute schema from a CSV file.
+
+    Type detection logic (in priority order):
+    1. FORCE_ENUM_COLUMNS  — always enum, regardless of cardinality
+    2. Pure numeric        — number_range
+    3. Pure date           — date
+    4. Low cardinality     — enum (up to ENUM_MAX_UNIQUE_VALUES unique values)
+    5. Fallback            — free-text string
     """
     start_time = time.time()
     column_values = defaultdict(set)
@@ -73,9 +102,36 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
 
     all_columns = set(numeric_count) | set(string_count) | set(date_count)
 
+    if FORCE_ENUM_COLUMNS:
+        logger.debug(f"Force-enum columns: {FORCE_ENUM_COLUMNS}")
+
     for col in all_columns:
 
-        # ✅ Pure numeric → number_range
+        # -------------------------------------------------------
+        # PRIORITY 1: FORCE_ENUM_COLUMNS
+        # -------------------------------------------------------
+        # Columns explicitly listed in FORCE_ENUM_COLUMNS are always
+        # classified as enum, regardless of how many unique values they have.
+        # This is critical for attributes like "color" in large catalogs
+        # where values like "rose gold" or "crystal pink" exceed the normal
+        # ENUM_MAX_UNIQUE_VALUES threshold but must still be validated by
+        # the LLM against real values rather than treated as free text.
+        # If the column has no string values at all (e.g. all numeric),
+        # fall through to normal type detection below.
+        if col in FORCE_ENUM_COLUMNS and col in column_values:
+            unique_values = sorted(column_values[col])
+            schema[col] = {
+                "type": "enum",
+                "rules": {
+                    "values": unique_values
+                }
+            }
+            logger.debug(f"  [{col}] → force-enum ({len(unique_values)} unique values)")
+            continue
+
+        # -------------------------------------------------------
+        # PRIORITY 2: Pure numeric → number_range
+        # -------------------------------------------------------
         if numeric_count[col] > 0 and string_count[col] == 0:
             schema[col] = {
                 "type": "number_range",
@@ -83,9 +139,12 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
                     "operators": ["$eq", "$lt", "$gt", "$gte", "$lte"]
                 }
             }
+            logger.debug(f"  [{col}] → number_range")
             continue
 
-        # ✅ Pure date → date
+        # -------------------------------------------------------
+        # PRIORITY 3: Pure date → date
+        # -------------------------------------------------------
         if date_count[col] > 0 and numeric_count[col] == 0 and string_count[col] == 0:
             schema[col] = {
                 "type": "date",
@@ -93,9 +152,12 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
                     "operators": ["$eq", "$lt", "$gt", "$gte", "$lte"]
                 }
             }
+            logger.debug(f"  [{col}] → date")
             continue
 
-        # ✅ Enum → low cardinality strings
+        # -------------------------------------------------------
+        # PRIORITY 4: Low cardinality strings → enum
+        # -------------------------------------------------------
         if 0 < len(column_values[col]) <= ENUM_MAX_UNIQUE_VALUES:
             schema[col] = {
                 "type": "enum",
@@ -103,16 +165,23 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
                     "values": sorted(column_values[col])
                 }
             }
+            logger.debug(f"  [{col}] → enum ({len(column_values[col])} unique values)")
             continue
 
-        # ✅ Fallback → free text
+        # -------------------------------------------------------
+        # PRIORITY 5: Fallback → free-text string
+        # -------------------------------------------------------
         schema[col] = {
             "type": "string",
             "rules": {
                 "description": "free text attribute"
             }
         }
-    # Optional file write
+        logger.debug(f"  [{col}] → string (free text, {len(column_values[col])} unique values)")
+
+    # -------------------------------------------------------
+    # Write schema to file
+    # -------------------------------------------------------
     if output_schema_path:
         os.makedirs(os.path.dirname(output_schema_path), exist_ok=True)
         with open(output_schema_path, "w", encoding="utf-8") as f:
@@ -120,16 +189,13 @@ def generate_schema_from_csv(csv_file_path: str) -> Dict:
 
     elapsed = time.time() - start_time
 
-    print("✅ Schema generation completed")
-    print(f"🔢 Total attributes: {len(schema)}")
-    print(f"⏱ Time taken: {elapsed:.4f} seconds")
+    logger.debug("✅ Schema generation completed")
+    logger.debug(f"🔢 Total attributes: {len(schema)}")
+    logger.debug(f"⏱ Time taken: {elapsed:.4f} seconds")
 
     if output_schema_path:
-        print(f"📁 Schema written to: {output_schema_path}")
-
-    #return schema
+        logger.debug(f"Schema written to: {output_schema_path}")
 
 
 if __name__ == "__main__":
     generate_schema_from_csv(CSV_FILE_PATH)
-    

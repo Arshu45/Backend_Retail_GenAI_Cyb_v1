@@ -74,6 +74,12 @@ class Settings(BaseSettings):
         default="title,embedding_text,keyword_tags",
         description="Comma-separated list of document columns"
     )
+
+    # Schema Generation Configuration
+    schema_dir: str = Field(
+        default="./data/schema",
+        description="Default dir to generate schema file"
+    )
     
     class Config:
         env_file = ".env"

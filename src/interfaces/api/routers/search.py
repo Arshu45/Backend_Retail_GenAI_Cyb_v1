@@ -10,7 +10,7 @@ from src.interfaces.api.dependencies import (
 )
 from src.application.services.product_search_service import ProductSearchService
 from src.application.services.agent_service import AgentService
-from src.utils.formatters import format_price, extract_key_features, generate_follow_up_questions
+from src.utils.formatters import generate_follow_up_questions, trim_response_text
 from src.config.logger import get_logger
 
 logger = get_logger(__name__)
@@ -43,32 +43,42 @@ async def search(
 
         response_text = result.get("response_text", "")
         agent_products = result.get("products", [])
-
+       
         # Format products for UI consumption
         formatted_products = []
         for p in agent_products:
             try:
+                price_value = p.get("price")
                 formatted_products.append(
                     ProductResult(
-                        id=p.get("product_id"),
+                        sku=p.get("sku"),
                         title=p.get("title", "Unknown Product"),
-                        price=f"₹{int(p.get('price', 0)):,}" if p.get('price') else "Price not available",
-                        key_features=[p.get("brand", ""), p.get("color", ""), p.get("size", "")]
+                        price = (
+                            f"₹{float(price_value):,.2f}"
+                            if price_value not in (None, "", 0)
+                            else "Price not available"
+                        ),
+                        key_features=p.get("key_features", "")
                     )
                 )
             except Exception as e:
                 logger.warning(f"Error formatting product result: {e}")
                 continue
         
-        # Generate dynamic follow-up questions
-        follow_up_questions = agent_service.generate_follow_ups(
-            query=request.query,
-            response_text=response_text
-        )
-        
-        # Fallback to static if dynamic fails or returns empty
-        if not follow_up_questions:
-            follow_up_questions = generate_follow_up_questions(agent_products)
+        # Trim duplicated product listings from the conversational response text
+        response_text = trim_response_text(str(response_text), formatted_products)
+
+        # Generate dynamic follow-up questions only if products were found
+        follow_up_questions = []
+        if formatted_products:
+            follow_up_questions = agent_service.generate_follow_ups(
+                query=request.query,
+                response_text=response_text
+            )
+            
+            # Fallback to static if dynamic fails or returns empty
+            if not follow_up_questions:
+                follow_up_questions = generate_follow_up_questions(agent_products)
 
         return SearchResponse(
             response_text=response_text,

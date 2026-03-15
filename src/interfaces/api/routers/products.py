@@ -1,33 +1,27 @@
 """
-Product API endpoints with dynamic category-based filtering
+Product API endpoints with simplified flat schema filtering
+Migrated from EAV to direct column queries (2026-02-13)
 """
 
-import json
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import exists, func
+from sqlalchemy import func, Float
 
 from src.infrastructure.database.connection import get_db
 from src.infrastructure.database.models import (
     Product,
     Category,
-    Attribute,
-    AttributeValue,
-    CategoryAttribute,
+    ProductCategory,
     ProductImage,
-    AttributeDataType,
 )
 from src.interfaces.api.schemas.product import (
     ProductListItem,
     ProductDetail,
     ProductListResponse,
-    ProductAttributeResponse,
     ProductImageResponse,
 )
-
-from src.utils.temp_image_fallback import get_fallback_image_url, get_fallback_images
 
 router = APIRouter(prefix="/products", tags=["products"])
 
@@ -38,137 +32,24 @@ router = APIRouter(prefix="/products", tags=["products"])
 
 def get_primary_image_url(product_id: str, db: Session) -> Optional[str]:
     """Get primary image URL for a product, with fallback to temp images."""
-    image = (
-        db.query(ProductImage)
-        .filter(
-            ProductImage.product_id == product_id,
-            ProductImage.is_primary.is_(True),
-        )
-        .first()
-    )
-    
-    # Return image URL if found, otherwise None
-    if image:
-        return image.image_url
-    else:
-        return get_fallback_image_url(product_id)
-
-
-def apply_attribute_filters(
-    query,
-    filter_dict: Dict[str, Any],
-    category_id: int,
-    db: Session,
-):
-    """
-    Apply dynamic attribute filters using CategoryAttribute mapping.
-    Ensures:
-    - Only category-allowed attributes are used
-    - ENUM / NUMBER / BOOLEAN / STRING are handled correctly
-    - Case-insensitive string matching
-    """
-
-    # Load allowed attributes for category
-    allowed_attrs = {
-        ca.attribute.name: ca.attribute
-        for ca in (
-            db.query(CategoryAttribute)
-            .join(Attribute)
+    try:
+        image = (
+            db.query(ProductImage)
             .filter(
-                CategoryAttribute.category_id == category_id,
-                CategoryAttribute.is_filterable.is_(True),
+                ProductImage.product_id == product_id,
+                ProductImage.is_primary == 1,  # Changed from Boolean to Integer
             )
-            .all()
+            .first()
         )
-    }
-
-    for attr_name, values in filter_dict.items():
-        attribute = allowed_attrs.get(attr_name)
-
-        if not attribute or values is None:
-            continue
-
-        # =======================
-        # ENUM (multi-select)
-        # =======================
-        if attribute.data_type == AttributeDataType.ENUM:
-            if not isinstance(values, list):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Attribute '{attr_name}' expects a list",
-                )
-
-            # ✅ FIX: Case-insensitive matching
-            # Convert filter values to lowercase for comparison
-            lower_values = [v.lower() for v in values]
-            
-            query = query.filter(
-                exists().where(
-                    AttributeValue.product_id == Product.product_id,
-                    AttributeValue.attribute_id == attribute.attribute_id,
-                    func.lower(AttributeValue.value_string).in_(lower_values),
-                )
-            )
-
-        # =======================
-        # NUMBER (range)
-        # =======================
-        elif attribute.data_type == AttributeDataType.NUMBER:
-            if not isinstance(values, dict):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Attribute '{attr_name}' expects min/max object",
-                )
-
-            conditions = [
-                AttributeValue.product_id == Product.product_id,
-                AttributeValue.attribute_id == attribute.attribute_id,
-            ]
-
-            if values.get("min") is not None:
-                conditions.append(AttributeValue.value_number >= values["min"])
-            if values.get("max") is not None:
-                conditions.append(AttributeValue.value_number <= values["max"])
-
-            query = query.filter(exists().where(*conditions))
-
-        # =======================
-        # BOOLEAN
-        # =======================
-        elif attribute.data_type == AttributeDataType.BOOLEAN:
-            if not isinstance(values, bool):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Attribute '{attr_name}' expects boolean",
-                )
-
-            query = query.filter(
-                exists().where(
-                    AttributeValue.product_id == Product.product_id,
-                    AttributeValue.attribute_id == attribute.attribute_id,
-                    AttributeValue.value_boolean == values,
-                )
-            )
-
-        # =======================
-        # STRING (text search)
-        # =======================
-        elif attribute.data_type == AttributeDataType.STRING:
-            if not isinstance(values, str):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Attribute '{attr_name}' expects string",
-                )
-
-            query = query.filter(
-                exists().where(
-                    AttributeValue.product_id == Product.product_id,
-                    AttributeValue.attribute_id == attribute.attribute_id,
-                    AttributeValue.value_string.ilike(f"%{values}%"),
-                )
-            )
-
-    return query
+        
+        # Return image URL if found, otherwise use fallback
+        if image:
+            return image.image_url
+        else:
+            return None  #TODO : Add fallback image
+    except Exception:
+        # Table doesn't exist yet or other DB error - use fallback
+        return None  #TODO : Add fallback image
 
 
 # ============================================================
@@ -180,16 +61,16 @@ async def list_products(
     page: int = Query(1, ge=1),
     page_size: int = Query(12, ge=1, le=100),
 
-    brand: Optional[str] = None,
+    # Static filters (direct columns)
     stock_status: Optional[str] = None,
-    category_id: Optional[int] = Query(None, description="Required for filters"),
+    category_id: Optional[int] = Query(None, description="Filter by category"),
     min_price: Optional[float] = Query(None, ge=0),
     max_price: Optional[float] = Query(None, ge=0),
-
-    filters: Optional[str] = Query(
-        None,
-        description='{"color":["pink"],"gsm":{"min":120,"max":180}}',
-    ),
+    
+    # Direct attribute filters
+    color: Optional[str] = Query(None, description="Filter by color"),
+    size: Optional[str] = Query(None, description="Filter by size"),
+    product_type: Optional[str] = Query(None, description="Filter by product type"),
 
     sort_by: str = Query("product_id"),
     sort_order: str = Query("asc", regex="^(asc|desc)$"),
@@ -197,73 +78,53 @@ async def list_products(
     db: Session = Depends(get_db),
 ):
     """
-    List products with static and dynamic filtering.
+    List products with direct column filtering.
     
-    Example filters param:
-    {
-        "color": ["Peach", "Pink"],
-        "gender": ["Girls"],
-        "gsm": {"min": 100, "max": 200},
-        "skin_friendly": true
-    }
+    Example:
+    /products?category_id=123&color=Red&min_price=100&max_price=500
     """
     
-    # ✅ ADD: Debug logging
-    # print(f"[PRODUCTS] Received filters: {filters}")
-    # print(f"[PRODUCTS] Category ID: {category_id}")
-    
-    if filters and not category_id:
-        raise HTTPException(
-            status_code=400,
-            detail="category_id is required when using dynamic filters",
-        )
-
     query = db.query(Product)
 
     # =======================
     # STATIC FILTERS
     # =======================
-    if brand:
-        query = query.filter(Product.brand.ilike(f"%{brand}%"))
-
     if stock_status:
         query = query.filter(Product.stock_status == stock_status)
 
     if category_id:
-        query = query.filter(Product.category_id == category_id)
-
-    if min_price is not None:
-        query = query.filter(Product.price >= min_price)
-
-    if max_price is not None:
-        query = query.filter(Product.price <= max_price)
-
-    # =======================
-    # DYNAMIC FILTERS
-    # =======================
-    if filters:
-        try:
-            filter_dict = json.loads(filters)
-            # print(f"[PRODUCTS] Parsed filter_dict: {filter_dict}")  # ✅ Debug
-        except Exception as e:
-            print(f"[PRODUCTS] JSON parse error: {e}")  # ✅ Debug
-            raise HTTPException(status_code=400, detail="Invalid filters JSON")
-
-        query = apply_attribute_filters(
-            query=query,
-            filter_dict=filter_dict,
-            category_id=category_id,
-            db=db,
+        # Join with product_categories junction table
+        query = query.join(ProductCategory).filter(
+            ProductCategory.category_id == category_id
         )
 
-    # Prevent duplicates from EXISTS joins
+    if min_price is not None:
+        # Price is stored as VARCHAR, so we need to cast it
+        query = query.filter(func.cast(Product.price, Float) >= min_price)
+
+    if max_price is not None:
+        query = query.filter(func.cast(Product.price, Float) <= max_price)
+
+    # =======================
+    # DIRECT ATTRIBUTE FILTERS
+    # =======================
+    if color:
+        query = query.filter(Product.color.ilike(f"%{color}%"))
+    
+    if size:
+        query = query.filter(Product.size.ilike(f"%{size}%"))
+    
+    if product_type:
+        query = query.filter(Product.product_type.ilike(f"%{product_type}%"))
+
+    # Prevent duplicates from joins
     query = query.distinct(Product.product_id)
 
     # =======================
     # SORTING
     # =======================
     sort_col = {
-        "price": Product.price,
+        "price": func.cast(Product.price, Float),  # Cast for numeric sorting
         "title": Product.title,
     }.get(sort_by, Product.product_id)
 
@@ -275,8 +136,6 @@ async def list_products(
     # PAGINATION
     # =======================
     total = query.count()
-    
-    print(f"[PRODUCTS] Total results after filtering: {total}")  # ✅ Debug
 
     products = (
         query.offset((page - 1) * page_size)
@@ -287,14 +146,14 @@ async def list_products(
     items = [
         ProductListItem(
             product_id=p.product_id,
+            sku=p.sku,
             title=p.title,
-            brand=p.brand,
-            product_type=p.product_type,
+            description=p.description,
             price=p.price,
-            mrp=p.mrp,
-            discount_percent=p.discount_percent,
-            currency=p.currency,
             stock_status=p.stock_status,
+            color=p.color,
+            size=p.size,
+            product_type=p.product_type,
             primary_image=get_primary_image_url(p.product_id, db),
         )
         for p in products
@@ -348,14 +207,14 @@ async def get_products_by_ids(
             items.append(
                 ProductListItem(
                     product_id=product.product_id,
+                    sku=product.sku,
                     title=product.title,
-                    brand=product.brand,
-                    product_type=product.product_type,
+                    description=product.description,
                     price=product.price,
-                    mrp=product.mrp,
-                    discount_percent=product.discount_percent,
-                    currency=product.currency,
                     stock_status=product.stock_status,
+                    color=product.color,
+                    size=product.size,
+                    product_type=product.product_type,
                     primary_image=get_primary_image_url(product.product_id, db),
                 )
             )
@@ -378,59 +237,43 @@ async def get_product(product_id: str, db: Session = Depends(get_db)):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    attribute_values = (
-        db.query(AttributeValue)
-        .join(Attribute)
-        .filter(AttributeValue.product_id == product_id)
+    # Get categories for this product
+    categories = (
+        db.query(Category)
+        .join(ProductCategory)
+        .filter(ProductCategory.product_id == product_id)
         .all()
     )
 
-    attributes = []
-    for av in attribute_values:
-        if av.value_string is not None:
-            val = av.value_string
-        elif av.value_number is not None:
-            val = str(av.value_number)
-        else:
-            val = str(av.value_boolean)
-
-        attributes.append(
-            ProductAttributeResponse(
-                attribute_id=av.attribute.attribute_id,
-                attribute_name=av.attribute.name,
-                attribute_type=av.attribute.data_type.value,
-                value=val,
-            )
+    # Get images (if table exists)
+    try:
+        images = (
+            db.query(ProductImage)
+            .filter(ProductImage.product_id == product_id)
+            .order_by(ProductImage.is_primary.desc(), ProductImage.display_order)
+            .all()
         )
-
-    images = (
-        db.query(ProductImage)
-        .filter(ProductImage.product_id == product_id)
-        .order_by(ProductImage.is_primary.desc(), ProductImage.display_order)
-        .all()
-    )
-    
-    # ⚠️ TEMPORARY: Use fallback images if DB is empty
-    if not images:
-        from src.interfaces.api.schemas.product import ProductImageResponse
-        fallback_images = get_fallback_images(product_id, count=3)
-        images = [
-            ProductImageResponse(**img) for img in fallback_images
-        ]
+        # If no images found, use fallback
+        if not images:
+            # Fallback images will be added later
+            images = []
+    except Exception:
+        # Table doesn't exist yet - use fallback
+        images = []
 
     return ProductDetail(
         product_id=product.product_id,
+        sku=product.sku,
         title=product.title,
-        brand=product.brand,
-        product_type=product.product_type,
+        description=product.description,
         price=product.price,
-        mrp=product.mrp,
-        discount_percent=product.discount_percent,
-        currency=product.currency,
         stock_status=product.stock_status,
+        color=product.color,
+        size=product.size,
+        care_instruction=product.care_instruction,
+        product_type=product.product_type,
         primary_image=get_primary_image_url(product_id, db),
-        category=product.category,
-        attributes=attributes,
+        categories=categories,
         images=images,
         created_at=product.created_at,
         updated_at=product.updated_at,
